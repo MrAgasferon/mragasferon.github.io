@@ -5,7 +5,7 @@
  *  - убраны обфускация, мёртвый код и блокировка bylampa.online;
  *  - источник фонового трейлера на выбор: RUTUBE (по умолчанию; поиск как в плагине rutube_trailer:
  *    кэш trailer.rootu.top по TMDB id → поиск RUTUBE, играет через <video> + HLS) или YouTube
- *    (ролики из данных TMDB, IFrame API);
+ *    (ролики из данных TMDB, по настройке — ещё и поиск youtube.com; IFrame API);
  *  - «Авто» в масштабе: кадр под экран, вшитые чёрные полосы находятся и обрезаются
  *    (RUTUBE — по кадрам превью через wsrv.nl, запасной путь — кадры видео; YouTube — по автокадрам-превью);
  *    масштаб задаётся отдельно для RUTUBE и YouTube;
@@ -24,7 +24,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '3.5';
+	var VERSION = '3.6';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 4;     // сколько найденных роликов пробовать по очереди (с проверкой на мыло)
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -239,81 +239,16 @@
 	var searchProxy = '';
 	var rutubeUnreachable = false; // RUTUBE недоступен ни напрямую, ни через прокси — до перезагрузки не ищем
 
-	function searchTrailers(movie, isTv, onSuccess, onFail) {
-		var requests = [];
-		var finished = false;
-
-		function abort() {
-			finished = true;
-			requests.forEach(function (r) {
-				try {
-					r.clear();
-				} catch (e) {}
-			});
-			requests = [];
-		}
-
-		function request() {
-			var r = new Lampa.Reguest();
-			requests.push(r);
-			return r;
-		}
-
+	// Оценка найденных роликов — общая для поиска RUTUBE и YouTube.
+	// filter(list, query) → подходящие ролики по убыванию оценки в формате кэша rootu
+	// ({ title, url, thumbnail_url, duration, author, score, published })
+	function createScorer(movie, isTv) {
 		var year = String(movie.release_date || movie.first_air_date || '').replace(/\D+/g, '').substring(0, 4);
 		if (!isYear(year)) year = '';
 
 		var search = movie.title || movie.name || movie.original_title || movie.original_name || '';
 		var searchOrig = movie.original_title || movie.original_name || '';
 		var cleanSearch = cleanString(search);
-
-		if (cleanSearch.length < 2) {
-			onFail();
-			return abort;
-		}
-
-		var tmdbId = movie.id ? '000000' + movie.id : '';
-		if (tmdbId.length > 7) tmdbId = tmdbId.slice(-Math.max(7, String(movie.id).length));
-		var type = isTv ? 'tv' : 'movie';
-		var cacheKey = 'RUTUBE_trailer_' + type + (tmdbId || (Lampa.Utils.hash(search) * 1).toString(36));
-
-		function done(list) {
-			if (finished) return;
-			finished = true;
-			cacheSet(cacheKey, [true, list, search]);
-			onSuccess(list);
-		}
-
-		function notFound() {
-			if (finished) return;
-			finished = true;
-			cacheSet(cacheKey, [false, {}, search]);
-			onFail();
-		}
-
-		function networkFail() {
-			if (finished) return;
-			finished = true;
-			onFail();
-		}
-
-		log('trailer: ищу', '«' + search + '»', year || '(без года)', type);
-
-		var cached = cacheGet(cacheKey);
-		if (cached) {
-			var hit = cached[0] && cached[1] && cached[1].length;
-			log('trailer: из sessionStorage —', hit ? cached[1].length + ' шт.' : 'ранее не найден');
-			finished = true;
-			if (hit) onSuccess(rankByLang(cached[1]));
-			else onFail();
-			return abort;
-		}
-
-		if (rutubeUnreachable) {
-			log('trailer: RUTUBE недоступен в этой сессии — пропускаю поиск');
-			finished = true;
-			onFail();
-			return abort;
-		}
 
 		function rate(r, queryWords) {
 			var score = 0;
@@ -410,6 +345,89 @@
 					.join(' | ')
 			);
 		}
+
+		return { year: year, search: search, cleanSearch: cleanSearch, filter: filterResults, logTop: logTop };
+	}
+
+	function searchTrailers(movie, isTv, onSuccess, onFail) {
+		var requests = [];
+		var finished = false;
+
+		function abort() {
+			finished = true;
+			requests.forEach(function (r) {
+				try {
+					r.clear();
+				} catch (e) {}
+			});
+			requests = [];
+		}
+
+		function request() {
+			var r = new Lampa.Reguest();
+			requests.push(r);
+			return r;
+		}
+
+		var year = String(movie.release_date || movie.first_air_date || '').replace(/\D+/g, '').substring(0, 4);
+		if (!isYear(year)) year = '';
+
+		var search = movie.title || movie.name || movie.original_title || movie.original_name || '';
+		var searchOrig = movie.original_title || movie.original_name || '';
+		var cleanSearch = cleanString(search);
+
+		if (cleanSearch.length < 2) {
+			onFail();
+			return abort;
+		}
+
+		var tmdbId = movie.id ? '000000' + movie.id : '';
+		if (tmdbId.length > 7) tmdbId = tmdbId.slice(-Math.max(7, String(movie.id).length));
+		var type = isTv ? 'tv' : 'movie';
+		var cacheKey = 'RUTUBE_trailer_' + type + (tmdbId || (Lampa.Utils.hash(search) * 1).toString(36));
+
+		function done(list) {
+			if (finished) return;
+			finished = true;
+			cacheSet(cacheKey, [true, list, search]);
+			onSuccess(list);
+		}
+
+		function notFound() {
+			if (finished) return;
+			finished = true;
+			cacheSet(cacheKey, [false, {}, search]);
+			onFail();
+		}
+
+		function networkFail() {
+			if (finished) return;
+			finished = true;
+			onFail();
+		}
+
+		log('trailer: ищу', '«' + search + '»', year || '(без года)', type);
+
+		var cached = cacheGet(cacheKey);
+		if (cached) {
+			var hit = cached[0] && cached[1] && cached[1].length;
+			log('trailer: из sessionStorage —', hit ? cached[1].length + ' шт.' : 'ранее не найден');
+			finished = true;
+			if (hit) onSuccess(rankByLang(cached[1]));
+			else onFail();
+			return abort;
+		}
+
+		if (rutubeUnreachable) {
+			log('trailer: RUTUBE недоступен в этой сессии — пропускаю поиск');
+			finished = true;
+			onFail();
+			return abort;
+		}
+
+		var scorer = createScorer(movie, isTv);
+		var filterResults = scorer.filter;
+		var logTop = scorer.logTop;
 
 		var rule = langRule();
 		var trailerTypes = (rule ? [rule.official, rule.query] : []).concat(['трейлер', 'trailer', 'тизер']).filter(function (q, i, all) {
@@ -1587,6 +1605,257 @@
 		return ranked;
 	}
 
+	// ---------------------------------------------------------------------------
+	// Поиск трейлеров на YouTube (настройка «Поиск трейлеров на YouTube»).
+	// Страница поиска youtube.com → данные ytInitialData → ролики → та же оценка, что на RUTUBE.
+	// Работает там, где запросы Lampa нативные (Android-приложение); в браузере youtube.com
+	// не пускает по CORS — тогда выбор только из TMDB
+	// ---------------------------------------------------------------------------
+
+	var ytSearchUnavailable = false; // поиск YouTube не работает в этой сессии — сразу TMDB
+
+	function ytText(t) {
+		if (!t) return '';
+		if (t.simpleText) return t.simpleText;
+		if (t.runs) {
+			return t.runs
+				.map(function (r) {
+					return r.text || '';
+				})
+				.join('');
+		}
+		return '';
+	}
+
+	// «2:31» / «1:02:03» → секунды
+	function ytDuration(text) {
+		var parts = String(text || '').split(':');
+		var total = 0;
+		for (var i = 0; i < parts.length; i++) {
+			var n = parseInt(parts[i], 10);
+			if (isNaN(n)) return 0;
+			total = total * 60 + n;
+		}
+		return total;
+	}
+
+	// «2 года назад» / «11 месяцев назад» / «3 weeks ago» → примерный год загрузки
+	function ytYearFromAgo(text) {
+		var m = String(text || '').toLowerCase().match(/(\d+)\s*(лет|год|year|месяц|month|недел|week|дн|день|day|час|hour|минут|minute|секунд|second)/);
+		if (!m) return 0;
+		var n = parseInt(m[1], 10);
+		var u = m[2];
+		var days = /лет|год|year/.test(u) ? n * 365 : /месяц|month/.test(u) ? n * 30 : /недел|week/.test(u) ? n * 7 : /дн|день|day/.test(u) ? n : 0;
+		return new Date(Date.now() - days * 864e5).getFullYear();
+	}
+
+	// JSON-объект, начинающийся с text[start] === '{': конец ищем по парным скобкам вне строк
+	function extractJsonObject(text, start) {
+		var depth = 0;
+		var inString = false;
+		var escaped = false;
+		for (var i = start; i < text.length; i++) {
+			var c = text.charAt(i);
+			if (inString) {
+				if (escaped) escaped = false;
+				else if (c === '\\') escaped = true;
+				else if (c === '"') inString = false;
+				continue;
+			}
+			if (c === '"') inString = true;
+			else if (c === '{') depth++;
+			else if (c === '}') {
+				depth--;
+				if (depth === 0) return text.substring(start, i + 1);
+			}
+		}
+		return '';
+	}
+
+	// HTML страницы поиска → ролики в формате оценщика; null — страница не разобралась.
+	// Ищем именно присваивание (var ytInitialData = {…} или window["ytInitialData"] = {…}):
+	// само слово встречается на странице и в других местах
+	function parseYouTubeResults(html) {
+		var text = String(html || '');
+		var re = /ytInitialData["'\]]*\s*=\s*\{/g;
+		var match;
+		var data = null;
+
+		while (!data && (match = re.exec(text))) {
+			var start = match.index + match[0].length - 1;
+			var json = extractJsonObject(text, start);
+			if (!json) continue;
+			try {
+				data = JSON.parse(json);
+			} catch (e) {
+				data = null;
+			}
+		}
+		if (!data) return null;
+
+		var found = [];
+		(function walk(node, depth) {
+			if (!node || typeof node !== 'object' || depth > 60) return;
+			if (node.videoRenderer && node.videoRenderer.videoId) {
+				found.push(node.videoRenderer);
+				return;
+			}
+			for (var k in node) {
+				if (Object.prototype.hasOwnProperty.call(node, k)) walk(node[k], depth + 1);
+			}
+		})(data, 0);
+
+		return found
+			.filter(function (v) {
+				return !!v.lengthText; // без длительности — трансляции и анонсы
+			})
+			.map(function (v) {
+				var uploaded = ytYearFromAgo(ytText(v.publishedTimeText));
+				return {
+					title: ytText(v.title),
+					duration: ytDuration(ytText(v.lengthText)),
+					url: 'https://www.youtube.com/watch?v=' + v.videoId,
+					published: uploaded ? String(uploaded) : '',
+					author: { name: ytText(v.ownerText) }
+				};
+			});
+	}
+
+	function youtubeIdFromUrl(url) {
+		var m = String(url || '').match(/[?&]v=([\w-]{11})/);
+		return m ? m[1] : '';
+	}
+
+	// done(list) — найденные ролики { id, title, score, source: 'поиск' } по убыванию оценки (может быть пусто)
+	function searchYouTube(movie, isTv, done) {
+		var scorer = createScorer(movie, isTv);
+		var finished = false;
+		var net = null;
+
+		function finish(list, cache) {
+			if (finished) return;
+			finished = true;
+			if (cache) cacheSet(cacheKey, list);
+			done(
+				list.map(function (x) {
+					return { id: youtubeIdFromUrl(x.url), title: x.title, score: x.score, source: 'поиск' };
+				})
+			);
+		}
+
+		function abort() {
+			finished = true;
+			if (net) {
+				try {
+					net.clear();
+				} catch (e) {}
+			}
+		}
+
+		if (scorer.cleanSearch.length < 2) {
+			finish([]);
+			return abort;
+		}
+
+		var tmdbId = movie.id ? String(movie.id) : (Lampa.Utils.hash(scorer.search) * 1).toString(36);
+		var cacheKey = 'CARDIFY_yt_search_' + (isTv ? 'tv' : 'movie') + tmdbId;
+		var cached = cacheGet(cacheKey);
+		if (cached && cached.length !== undefined) {
+			log('trailer: YouTube-поиск из sessionStorage —', cached.length + ' шт.');
+			finish(cached, false);
+			return abort;
+		}
+
+		if (ytSearchUnavailable) {
+			log('trailer: YouTube-поиск недоступен в этой сессии — только TMDB');
+			finish([], false);
+			return abort;
+		}
+
+		var lang = contentLang();
+		var rule = langRule();
+		var generic = lang === 'en' ? 'official trailer' : 'трейлер';
+		var queries = (rule ? [rule.query] : []).concat([generic]).filter(function (q, i, all) {
+			return all.indexOf(q) === i;
+		});
+
+		function step(i) {
+			if (finished) return;
+			if (i >= queries.length) return finish([], true);
+
+			var query = cleanString([scorer.search, scorer.year, queries[i], isTv ? 'сезон 1' : ''].join(' '));
+			// sp=EgIQAQ== — фильтр «только видео»
+			var url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query) + '&hl=' + (lang || 'ru') + '&sp=EgIQAQ%3D%3D';
+
+			net = new Lampa.Reguest();
+			net.timeout(10000);
+			net.native(
+				url,
+				function (html) {
+					if (finished) return;
+					var items = parseYouTubeResults(html);
+					if (!items) {
+						ytSearchUnavailable = true;
+						log('trailer: YouTube-поиск — страница не разобралась (сменился формат?), до перезапуска только TMDB');
+						return finish([], false);
+					}
+					var list = scorer.filter(items, query);
+					log('trailer: YouTube-поиск «' + query + '» —', items.length + ' роликов, подходит ' + list.length);
+					if (list.length) {
+						scorer.logTop(list);
+						return finish(list, true);
+					}
+					step(i + 1);
+				},
+				function (xhr) {
+					if (finished) return;
+					log('trailer: YouTube-поиск не удался —', errInfo(xhr));
+					if (!xhr || xhr.status === 0) {
+						ytSearchUnavailable = true;
+						log('trailer: YouTube-поиск недоступен (в браузере это CORS) — до перезапуска только TMDB');
+					}
+					finish([], false);
+				},
+				false,
+				{ dataType: 'text' }
+			);
+		}
+
+		log('trailer: YouTube-поиск', '«' + scorer.search + '»', scorer.year || '(без года)');
+		step(0);
+		return abort;
+	}
+
+	// Порядок при включённом поиске: официальные трейлеры TMDB на своём языке (группа 0) →
+	// найденное поиском → остальные ролики TMDB; без повторов
+	function mergeYouTubeCandidates(tmdb, found) {
+		var top = tmdb.filter(function (c) {
+			return c.group === 0 && c.official && c.rank <= 3;
+		});
+		var seen = {};
+		var merged = top
+			.concat(found, tmdb)
+			.filter(function (c) {
+				if (!c.id || seen[c.id]) return false;
+				seen[c.id] = true;
+				return true;
+			})
+			.slice(0, MAX_TRAILER_CANDIDATES);
+
+		if (merged.length) {
+			log(
+				'trailer: YouTube, порядок —',
+				merged
+					.slice(0, 3)
+					.map(function (c) {
+						return '«' + c.title + '» [' + (c.source || 'TMDB') + ']';
+					})
+					.join(' | ')
+			);
+		}
+		return merged;
+	}
+
 	function createYouTubeBackground(videoId, handlers) {
 		var html = $('<div class="cardify-trailer"><div class="cardify-trailer__yt"><div></div></div></div>');
 		var box = html.find('.cardify-trailer__yt')[0];
@@ -2271,12 +2540,26 @@
 
 		function startTrailer() {
 			if (trailerSource() === 'youtube') {
-				var list = youtubeCandidates(e);
-				if (!list.length) {
-					log('trailer: в данных TMDB нет роликов YouTube');
-					return fallback();
+				var tmdbList = youtubeCandidates(e);
+
+				if (!isOn('cardify_yt_search')) {
+					if (!tmdbList.length) {
+						log('trailer: в данных TMDB нет роликов YouTube');
+						return fallback();
+					}
+					return tryYouTube(tmdbList, 0);
 				}
-				return tryYouTube(list, 0);
+
+				abortSearch = searchYouTube(movie, isTv, function (found) {
+					if (destroyed) return;
+					var merged = mergeYouTubeCandidates(tmdbList, found);
+					if (!merged.length) {
+						log('trailer: роликов YouTube нет ни в TMDB, ни в поиске');
+						return fallback();
+					}
+					tryYouTube(merged, 0);
+				});
+				return;
 			}
 
 			abortSearch = searchTrailers(
@@ -2340,6 +2623,12 @@
 				ru: 'RUTUBE — поиск по названию, YouTube — ролики из TMDB',
 				uk: 'RUTUBE — пошук за назвою, YouTube — ролики з TMDB',
 				en: 'RUTUBE: search by title, YouTube: videos from TMDB'
+			},
+			cardify_s_yt_search: { ru: 'Поиск трейлеров на YouTube', uk: 'Пошук трейлерів на YouTube', en: 'Search trailers on YouTube' },
+			cardify_s_yt_search_descr: {
+				ru: 'Для источника YouTube: искать трейлеры на русском поиском YouTube, а не только среди роликов TMDB. Работает в приложении Lampa на Android; в браузере — как обычно, через TMDB',
+				uk: 'Для джерела YouTube: шукати трейлери пошуком YouTube, а не лише серед роликів TMDB. Працює в застосунку Lampa на Android; у браузері — як зазвичай, через TMDB',
+				en: 'For the YouTube source: find trailers with YouTube search, not only among TMDB videos. Works in the Lampa Android app; in a browser it uses TMDB as usual'
 			},
 			cardify_s_trailer: { ru: 'Фоновый трейлер', uk: 'Фоновий трейлер', en: 'Background trailer' },
 			cardify_s_trailer_descr: {
@@ -2471,6 +2760,8 @@
 			'cardify_s_source',
 			'cardify_s_source_descr'
 		);
+
+		addParam({ name: 'cardify_yt_search', type: 'trigger', default: false }, 'cardify_s_yt_search', 'cardify_s_yt_search_descr');
 
 		addParam({ name: 'cardify_trailers_bg', type: 'trigger', default: false }, 'cardify_s_trailer', 'cardify_s_trailer_descr');
 
