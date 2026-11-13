@@ -24,7 +24,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '3.3';
+	var VERSION = '3.4';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 4;     // сколько найденных роликов пробовать по очереди (с проверкой на мыло)
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -46,6 +46,7 @@
 			official: 'официальный русский трейлер',
 			query: 'русский трейлер',
 			isOfficial: /официальн/,
+			officialAloneIsOriginal: true, // «Официальный трейлер» без «русский» на RUTUBE — обычно оригинал
 			good: /русск|на русском|дубляж|дублир|\brus\b/,
 			bad: /англ|english|\beng\b|оригинал|original|субтитр|subtitle|\bsubs?\b|любительск|фанатск/
 		},
@@ -53,6 +54,7 @@
 			official: 'офіційний український трейлер',
 			query: 'український трейлер',
 			isOfficial: /офіційн|официальн/,
+			officialAloneIsOriginal: true,
 			good: /українськ|українською|\bukr\b|\bукр\b/,
 			bad: /англ|english|\beng\b|оригінал|original|субтитр|subtitle|\bsubs?\b|аматорськ|любительск/
 		},
@@ -70,9 +72,10 @@
 
 	var SCORE = {
 		OFFICIAL: 100,
+		LIKELY_ORIGINAL: -150,
 		LANG_MATCH: 150,
 		EXACT_MATCH: 300,
-		YEAR_MATCH: 100,
+		YEAR_MATCH: 250,
 		WRONG_YEAR: -1000,
 		NO_MATCH: -2000,
 		WORD_MATCH: 100,
@@ -184,16 +187,31 @@
 		return (rule.good.test(t) ? 1 : 0) - (rule.bad.test(t) ? 1 : 0);
 	}
 
-	function isOfficialTitle(title) {
+	// 1 — официальный на своём языке («официальный русский/дублированный»),
+	// -1 — «официальный» без пометки языка (обычно оригинал), 0 — не официальный
+	function officialKind(title) {
 		var rule = langRule();
-		return !!rule && rule.isOfficial.test(cleanString(title));
+		if (!rule) return 0;
+		var t = cleanString(title);
+		if (!rule.isOfficial.test(t)) return 0;
+		if (rule.good.test(t)) return 1;
+		return rule.officialAloneIsOriginal ? -1 : 1;
 	}
 
-	// Свой язык вперёд, чужой назад; при равном языке официальные вперёд; иначе порядок сохраняется
+	// Год загрузки ролика, если RUTUBE его отдал (иначе 0 — правило не применяется)
+	function uploadYear(r) {
+		var ts = r.publication_ts || r.created_ts || r.published || '';
+		if (!ts) return 0;
+		if (typeof ts === 'number') return new Date(ts > 1e12 ? ts : ts * 1000).getFullYear();
+		var m = String(ts).match(/^(\d{4})/);
+		return m ? parseInt(m[1], 10) : 0;
+	}
+
+	// Свой язык вперёд, чужой назад; при равном языке официальные на своём языке вперёд
 	function rankByLang(list) {
 		return list
 			.map(function (item, i) {
-				return { item: item, i: i, l: langScore(item.title), o: isOfficialTitle(item.title) ? 1 : 0 };
+				return { item: item, i: i, l: langScore(item.title), o: officialKind(item.title) };
 			})
 			.sort(function (a, b) {
 				return b.l - a.l || b.o - a.o || a.i - b.i;
@@ -327,13 +345,22 @@
 				}
 			}
 
+			// пометки своего языка («дубляж», «русский»…) — не «лишние» слова
+			var rule = langRule();
 			var matching = titleWords.filter(function (w) {
-				return queryWords.indexOf(w) >= 0;
+				return queryWords.indexOf(w) >= 0 || (!!rule && rule.good.test(w));
 			});
 			score += matching.length * SCORE.WORD_MATCH - (titleWords.length - matching.length) * SCORE.EXTRA_WORD_PENALTY;
 			score += r.duration > 120 ? SCORE.DURATION_BONUS : SCORE.DURATION_PENALTY;
 			score += langScore(r.title) * SCORE.LANG_MATCH;
-			if (isOfficialTitle(r.title)) score += SCORE.OFFICIAL;
+
+			var official = officialKind(r.title);
+			if (official > 0) score += SCORE.OFFICIAL;
+			if (official < 0) score += SCORE.LIKELY_ORIGINAL;
+
+			// загружен задолго до выхода фильма — трейлер другой части франшизы или оригинала
+			var uploaded = uploadYear(r);
+			if (year && uploaded && uploaded < parseInt(year, 10) - 2) score += SCORE.WRONG_YEAR;
 
 			return score;
 		}
@@ -347,8 +374,9 @@
 				.filter(function (r) {
 					r._title = cleanString(r.title);
 					var isTrailer = /трейлер|trailer|тизер|teaser/.test(r._title);
-					var durationOk = r.duration && r.duration < 600;
-					if (!r.embed_url || !isTrailer || !durationOk) return false;
+					// длительность есть у результатов поиска; в кэше rootu её может не быть — тогда не отсеиваем
+					var durationOk = r.duration ? r.duration < 600 : !!r.url;
+					if (!(r.video_url || r.embed_url || r.url) || !isTrailer || !durationOk) return false;
 					if (r.is_hidden || r.is_deleted || r.is_locked || r.is_audio || r.is_paid || r.is_livestream || r.is_adult) return false;
 					r._rate = rate(r, queryWords);
 					return r._rate > SCORE.MIN_RATE_THRESHOLD;
@@ -360,12 +388,27 @@
 					// формат как в кэше rootu — его же читает rutube_trailer
 					return {
 						title: r.title,
-						url: r.video_url || r.embed_url,
+						url: r.video_url || r.embed_url || r.url,
 						thumbnail_url: r.thumbnail_url,
 						duration: r.duration,
-						author: r.author || { name: '' }
+						author: r.author || { name: '' },
+						score: r._rate, // для слияния результатов разных запросов
+						published: r.publication_ts || r.created_ts || r.published || ''
 					};
 				});
+		}
+
+		function logTop(list) {
+			if (!list.length) return;
+			log(
+				'trailer: лучшие —',
+				list
+					.slice(0, 3)
+					.map(function (x) {
+						return '«' + x.title + '» ' + x.score + (x.published ? ' (' + String(x.published).substring(0, 10) + ')' : '');
+					})
+					.join(' | ')
+			);
 		}
 
 		var rule = langRule();
@@ -374,14 +417,20 @@
 		});
 		var officialFound = []; // найденное по «официальному» запросу ждёт результатов второго запроса
 
+		// Слияние результатов двух запросов: без повторов и по оценке, а не по порядку запросов
 		function mergeById(a, b) {
 			var seen = {};
-			return a.concat(b).filter(function (r) {
-				var key = rutubeId(r.url) || r.url;
-				if (seen[key]) return false;
-				seen[key] = true;
-				return true;
-			});
+			return a
+				.concat(b)
+				.filter(function (r) {
+					var key = rutubeId(r.url) || r.url;
+					if (seen[key]) return false;
+					seen[key] = true;
+					return true;
+				})
+				.sort(function (x, y) {
+					return (y.score || 0) - (x.score || 0);
+				});
 		}
 
 		function searchStep(index) {
@@ -406,10 +455,14 @@
 						return searchStep(1);
 					}
 					if (rule && index === 1 && officialFound.length) {
-						return done(mergeById(officialFound, list));
+						var merged = mergeById(officialFound, list);
+						logTop(merged);
+						return done(merged);
 					}
-					if (list.length) done(list);
-					else searchStep(index + 1);
+					if (list.length) {
+						logTop(list);
+						done(list);
+					} else searchStep(index + 1);
 				},
 				function (xhr) {
 					if (!searchProxy && isCorsBlocked(xhr)) {
@@ -438,13 +491,15 @@
 					log('trailer: кэш rootu —', list && list.length ? list.length + ' шт.' : 'пусто');
 					if (!list || !list.length) return searchStep(0);
 
-					// кэш общий для всех пользователей и язык не учитывает
-					var ranked = rankByLang(list);
-					if (langRule() && langScore(ranked[0].title) < 0) {
-						log('trailer: в кэше rootu только ролики с пометкой другого языка — ищу сам');
+					// кэш общий для всех пользователей и язык/год не учитывает — оцениваем как поиск
+					var rootuQuery = cleanString([search, year, rule ? rule.query : 'трейлер'].join(' '));
+					var scored = filterResults(list, rootuQuery);
+					if (!scored.length || (rule && langScore(scored[0].title) < 0)) {
+						log('trailer: в кэше rootu подходящих нет — ищу сам');
 						return searchStep(0);
 					}
-					done(ranked);
+					logTop(scored);
+					done(scored);
 				},
 				function (xhr) {
 					log('trailer: кэш rootu —', xhr && xhr.status === 404 ? 'нет записи' : 'недоступен, ' + errInfo(xhr));
