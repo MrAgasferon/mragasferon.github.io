@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f8f7f4">
+<title></title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { width:100%; height:100%; margin:0; }
+  body {
+    display:grid; place-items:center; overflow:hidden;
+    background: radial-gradient(ellipse at 50% 44%, #fff 0 38%, #f5f3ef 100%);
+  }
+  .scene { width:min(94vw, 760px); height:min(94vh, 1050px); }
+  svg { width:100%; height:100%; overflow:visible; }
+  .rocker {
+    transform-box: view-box;
+    transform-origin: 410px 1000px;
+    animation: rocking 2.15s ease-in-out infinite;
+  }
+  .horse {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: horse-bob 2.15s ease-in-out infinite;
+  }
+  .rider {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: rider-bob 2.15s ease-in-out infinite;
+  }
+  .tail {
+    transform-box: fill-box; transform-origin: 100% 20%;
+    animation: tail-swish 2.15s ease-in-out infinite;
+  }
+  .hat {
+    transform-box: fill-box; transform-origin: 50% 100%;
+    animation: hat-bob 2.15s ease-in-out infinite;
+  }
+  @keyframes rocking {
+    0%,100% { transform:rotate(-3deg) translateY(0); }
+    50% { transform:rotate(3deg) translateY(2px); }
+  }
+  @keyframes horse-bob {
+    0%,100% { transform:translateY(0); }
+    50% { transform:translateY(-4px); }
+  }
+  @keyframes rider-bob {
+    0%,100% { transform:translateY(0) rotate(-1deg); }
+    50% { transform:translateY(-7px) rotate(1deg); }
+  }
+  @keyframes tail-swish {
+    0%,100% { transform:rotate(-5deg); }
+    50% { transform:rotate(8deg); }
+  }
+  @keyframes hat-bob {
+    0%,100% { transform:rotate(0deg); }
+    50% { transform:rotate(1.5deg) translateY(-2px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation:none !important; }
+  }
+</style>
+</head>
+<body>
+<main class="scene" aria-label="Ковбой качается на деревянной лошадке">
+<svg viewBox="0 0 832 1248" role="img" aria-label="Улыбающийся ковбой на коне-качалке">
+<defs>
+  <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#a66d49"/><stop offset=".55" stop-color="#8d5738"/><stop offset="1" stop-color="#60391f"/>
+  </linearGradient>
+  <linearGradient id="woodLight" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#b27a54"/><stop offset="1" stop-color="#805033"/>
+  </linearGradient>
+  <linearGradient id="hatColor" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#9b6746"/><stop offset="1" stop-color="#70452e"/>
+  </linearGradient>
+  <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur stdDeviation="13"/>
+  </filter>
+</defs>
+
+<!-- soft ground shadow -->
+<ellipse cx="414" cy="1080" rx="300" ry="28" fill="#8a735e" opacity=".12" filter="url(#shadow)"/>
+
+<g class="rocker">
+  <g class="horse">
+    <!-- tail -->
+    <g class="tail">
+      <path d="M206 680 C139 633 102 669 105 748 C106 805 75 832 111 854 C151 878 199 835 196 789 C193 747 235 730 249 710Z" fill="#60391f"/>
+      <path d="M194 694 C150 673 131 704 137 756 C142 797 119 822 139 831 C166 842 186 805 177 769 C170 736 207 720 220 710Z" fill="#8a5433"/>
+    </g>
+    <!-- horse body -->
+    <path d="M192 690 C221 640 298 631 386 649 C463 665 520 631 572 621 C632 610 668 653 653 730 L626 833 C607 888 537 916 439 916 L267 889 C201 876 162 821 174 754Z" fill="url(#wood)" stroke="#6e4329" stroke-width="8"/>
+    <!-- neck -->
+    <path d="M454 724 C457 630 478 512 554 455 C596 422 643 436 668 477 C691 515 704 555 716 584 C733 625 703 652 669 650 L611 642 C612 706 654 774 625 843 C605 888 556 901 519 875 C488 851 469 790 454 724Z" fill="url(#woodLight)" stroke="#6e4329" stroke-width="8"/>
+    <!-- mane -->
+    <path d="M530 497 C547 459 591 430 632 424 C613 451 604 473 598 498 C621 466 641 438 664 425 C670 463 655 500 626 524Z" fill="#5d351f"/>
+    <path d="M544 492 C572 458 597 440 625 431 C604 459 593 485 584 510Z" fill="#a36b47"/>
+    <!-- head -->
+    <path d="M565 497 C608 458 662 470 691 515 L726 567 C746 594 731 627 700 641 C678 651 650 637 631 619 L584 604 C552 585 539 530 565 497Z" fill="url(#woodLight)" stroke="#6e4329" stroke-width="8"/>
+    <!-- muzzle -->
+    <path d="M678 576 C714 572 739 589 728 620 C718 650 687 653 662 636 C645 625 644 605 654 591Z" fill="#a96f4b"/>
+    <!-- bridle -->
+    <path d="M528 503 L667 616" fill="none" stroke="#60391f" stroke-width="14" stroke-linecap="round"/>
+    <path d="M564 481 C539 527 535 566 550 603" fill="none" stroke="#60391f" stroke-width="12"/>
+    <circle cx="634" cy="523" r="12" fill="#29231f"/>
+    <!-- body detail -->
+    <path d="M246 663 C321 644 398 663 441 708 C472 741 470 791 444 824" fill="none" stroke="#6e4329" stroke-width="8" opacity=".55"/>
+    <!-- legs -->
+    <path d="M247 842 C228 902 196 941 184 1005 L164 1031 L225 1048 L263 1018 C261 965 279 932 320 895 L346 861Z" fill="#8e5939" stroke="#6e4329" stroke-width="8"/>
+    <path d="M498 862 C522 918 546 971 564 1022 L624 1022 L638 1003 C615 944 604 884 581 833Z" fill="#99613e" stroke="#6e4329" stroke-width="8"/>
+    <!-- rocker base -->
+    <path d="M41 963 C138 1034 255 1062 408 1062 C565 1062 690 1029 791 953" fill="none" stroke="#70452c" stroke-width="70" stroke-linecap="round"/>
+    <path d="M41 950 C154 1016 273 1038 411 1038 C554 1038 683 1009 791 940" fill="none" stroke="url(#woodLight)" stroke-width="57" stroke-linecap="round"/>
+    <path d="M174 1010 L187 1037 M588 1022 L601 1040" stroke="#60391f" stroke-width="14" stroke-linecap="round"/>
+    <!-- rounded rocker ends -->
+    <path d="M45 950 L17 936 M787 940 L813 927" stroke="#a16b47" stroke-width="52" stroke-linecap="round"/>
+  </g>
+
+  <g class="rider">
+    <!-- legs and boots -->
+    <path d="M310 625 C354 625 417 639 440 679 C454 703 438 748 419 788 L382 826 L329 801 L350 730 L288 704Z" fill="#22243d"/>
+    <path d="M363 770 L417 788 L399 842 L426 861 C441 872 434 892 416 894 L326 872 L338 821Z" fill="#242522"/>
+    <path d="M330 627 C362 640 391 670 405 705 L371 754 L316 731 L286 686Z" fill="#30385f"/>
+    <!-- torso -->
+    <path d="M286 428 C309 409 375 414 409 441 C430 460 410 509 421 532 C432 555 466 550 489 563 L494 616 L253 617 C257 552 265 470 286 428Z" fill="#303b70"/>
+    <path d="M255 616 L402 616 C395 646 364 676 319 678 C276 678 250 656 255 616Z" fill="#20233f"/>
+    <!-- arm -->
+    <path d="M393 526 C414 543 438 546 465 552 L480 581 C451 590 415 577 392 561 C384 551 386 538 393 526Z" fill="#303b70"/>
+    <path d="M457 552 C477 531 508 541 516 560 C523 580 507 600 485 600 C464 600 448 579 457 552Z" fill="#ffd52e"/>
+    <!-- head -->
+    <circle cx="397" cy="345" r="130" fill="#ffd52e"/>
+    <!-- eyes -->
+    <circle cx="333" cy="318" r="36" fill="#fff"/>
+    <circle cx="459" cy="318" r="36" fill="#fff"/>
+    <circle cx="333" cy="319" r="21" fill="#202020"/>
+    <circle cx="459" cy="319" r="21" fill="#202020"/>
+    <!-- smile -->
+    <path d="M327 391 C363 427 431 427 470 391" fill="none" stroke="#202020" stroke-width="18" stroke-linecap="round"/>
+    <!-- cowboy hat -->
+    <g class="hat">
+      <path d="M232 248 C228 218 235 205 253 205 C271 205 278 221 278 235 C280 249 294 251 315 249 L315 214 C315 180 336 155 367 155 C388 155 389 177 398 177 C408 177 409 155 429 155 C461 155 479 183 479 216 L479 249 C500 251 514 248 516 233 C518 216 527 205 540 205 C558 205 565 220 561 250 C555 292 523 304 482 304 L313 304 C267 304 238 286 232 248Z" fill="url(#hatColor)" stroke="#70452e" stroke-width="3"/>
+      <path d="M315 225 L479 225 L479 250 L315 250Z" fill="#c18b61" opacity=".65"/>
+      <path d="M368 221 L397 201 L426 221 L414 251 L397 267 L379 251Z" fill="#f4c928" stroke="#b38c11" stroke-width="3"/>
+      <path d="M397 209 L404 228 L423 228 L408 240 L414 258 L397 247 L380 258 L386 240 L371 228 L390 228Z" fill="#ffe45b" stroke="#b38c11" stroke-width="2"/>
+      <circle cx="397" cy="235" r="5" fill="#b38c11"/>
+    </g>
+  </g>
+</g>
+</svg>
+</main>
+</body>
+</html>
