@@ -7,7 +7,7 @@
  *    кэш trailer.rootu.top по TMDB id → поиск RUTUBE, играет через <video> + HLS) или YouTube
  *    (ролики из данных TMDB, IFrame API);
  *  - «Авто» в масштабе: кадр под экран, вшитые чёрные полосы находятся и обрезаются
- *    (RUTUBE — по кадрам видео или превью, YouTube — по автокадрам-превью);
+ *    (RUTUBE — по кадрам превью через wsrv.nl, запасной путь — кадры видео; YouTube — по автокадрам-превью);
  *  - трейлер и слайдшоу ставятся на паузу, пока открыт плеер или активна другая карточка;
  *  - интерфейс через Lampa.Lang (ru / uk / en).
  * Ключи настроек прежние (cardify_*), старые значения подхватятся.
@@ -23,7 +23,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '3.0';
+	var VERSION = '3.1';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 4;     // сколько найденных роликов пробовать по очереди (с проверкой на мыло)
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -538,7 +538,11 @@
 				});
 
 				var chosen = streams[chooseLevel(streams, target)];
-				finish(chosen.url, (chosen.height || '?') + 'p из ' + heightsOf(streams) + ', предел ' + target + 'p', { width: best, text: bestText });
+				finish(chosen.url, (chosen.height || '?') + 'p из ' + heightsOf(streams) + ', предел ' + target + 'p', {
+					width: best,
+					text: bestText,
+					aspect: chosen.width && chosen.height ? chosen.width / chosen.height : 0 // пропорции выбранного варианта
+				});
 			},
 			function (xhr) {
 				finish(masterUrl, '(master, плейлист не прочитан — ' + errInfo(xhr) + ')');
@@ -616,6 +620,10 @@
 	var DARK_LUMA = 32;              // яркость (0–255), ниже которой пиксель считается чёрным
 	var DETECT_EDGE_SKIP = 0.12;     // доля кадра у краёв, где не считаем светлое (логотипы, «18+»)
 	var DETECT_CONTENT = 0.1;        // строка — картинка, если хоть в одном кадре светится > 10 % её середины
+	var PREVIEW_PROXY = 'https://wsrv.nl/?url='; // открытый сервис картинок с CORS (wsrv.nl) — для превью RUTUBE
+	var PREVIEW_TIMEOUT = 4000;      // мс ожидания превью
+	var PREVIEW_WAIT = 2500;         // мс после старта видео, сколько ещё ждать превью перед показом
+	var PREVIEW_QUORUM = 0.3;        // по превью: строка — картинка, если светилась в ≥ 30 % светлых кадров
 
 	function trailerSource() {
 		return Lampa.Storage.field('cardify_trailers_source') === 'youtube' ? 'youtube' : 'rutube';
@@ -710,6 +718,8 @@
 		var h = 0;
 		var rowMax = [];
 		var colMax = [];
+		var rowHits = []; // в скольких светлых кадрах строка была «картинкой»
+		var colHits = [];
 		var meter = { ok: !!ctx, good: 0, solid: 0, empty: 0 };
 
 		function reset(nw, nh) {
@@ -719,8 +729,16 @@
 			canvas.height = h;
 			rowMax = [];
 			colMax = [];
-			for (var y = 0; y < h; y++) rowMax.push(0);
-			for (var x = 0; x < w; x++) colMax.push(0);
+			rowHits = [];
+			colHits = [];
+			for (var y = 0; y < h; y++) {
+				rowMax.push(0);
+				rowHits.push(0);
+			}
+			for (var x = 0; x < w; x++) {
+				colMax.push(0);
+				colHits.push(0);
+			}
 			meter.good = 0;
 			meter.solid = 0;
 		}
@@ -728,14 +746,15 @@
 		// source — <video> или <img>, sw/sh — размер его кадра.
 		// 'good' — кадр учтён, 'black' — почти чёрный, 'empty' — прозрачный (кадр не читается).
 		// Бросает SecurityError, если кадр с чужого домена без CORS
-		meter.add = function (source, sw, sh) {
+		// sx/sy — смещение кадра внутри источника (для полосы кадров одной картинкой)
+		meter.add = function (source, sw, sh, sx, sy) {
 			if (!sw || !sh) return 'black';
 
 			var nw = DETECT_SAMPLE_WIDTH;
 			var nh = Math.max(16, Math.round((nw * sh) / sw));
 			if (nw !== w || nh !== h) reset(nw, nh);
 
-			ctx.drawImage(source, 0, 0, w, h);
+			ctx.drawImage(source, sx || 0, sy || 0, sw, sh, 0, 0, w, h);
 			var px = ctx.getImageData(0, 0, w, h).data;
 
 			var opaque = false;
@@ -782,31 +801,46 @@
 			for (x = 0; x < w; x++) colMax[x] = Math.max(colMax[x], cols[x] / (y1 - y0));
 
 			meter.good++;
-			if (share >= DETECT_SOLID) meter.solid++; // светлый кадр: по нему видна граница картинки
+			if (share >= DETECT_SOLID) {
+				meter.solid++; // светлый кадр: по нему видна граница картинки
+				for (y = 0; y < h; y++) if (rows[y] / (x1 - x0) > DETECT_CONTENT) rowHits[y]++;
+				for (x = 0; x < w; x++) if (cols[x] / (y1 - y0) > DETECT_CONTENT) colHits[x]++;
+			}
 			return 'good';
 		};
 
 		// Тёмные края по каждой стороне отдельно (доли кадра) — для лога и расчёта
-		meter.raw = function () {
+		// quorum (0…1) — строка «картинка», только если светилась в такой доле светлых кадров.
+		// Нужен для кадров со всего ролика: надписи «подпишись» в полосах бывают лишь в части кадров.
+		// Без quorum — хватает одного кадра (подходит для первых секунд видео)
+		meter.raw = function (quorum) {
 			if (!meter.good) return { t: 0, b: 0, l: 0, r: 0 };
 
+			var need = quorum && meter.solid ? Math.max(Math.min(2, meter.solid), Math.ceil(meter.solid * quorum)) : 0;
+			function rowIsPicture(y) {
+				return need ? rowHits[y] >= need : rowMax[y] > DETECT_CONTENT;
+			}
+			function colIsPicture(x) {
+				return need ? colHits[x] >= need : colMax[x] > DETECT_CONTENT;
+			}
+
 			var t = 0;
-			while (t < h && rowMax[t] <= DETECT_CONTENT) t++;
+			while (t < h && !rowIsPicture(t)) t++;
 			var b = 0;
-			while (b < h - t && rowMax[h - 1 - b] <= DETECT_CONTENT) b++;
+			while (b < h - t && !rowIsPicture(h - 1 - b)) b++;
 			var l = 0;
-			while (l < w && colMax[l] <= DETECT_CONTENT) l++;
+			while (l < w && !colIsPicture(l)) l++;
 			var r = 0;
-			while (r < w - l && colMax[w - 1 - r] <= DETECT_CONTENT) r++;
+			while (r < w - l && !colIsPicture(w - 1 - r)) r++;
 
 			return { t: t / h, b: b / h, l: l / w, r: r / w };
 		};
 
 		// Полосы симметричные: субтитры в одной полосе не мешают, их срезает вместе с другой
-		meter.bars = function () {
+		meter.bars = function (quorum) {
 			if (!meter.good) return NO_BARS;
 
-			var raw = meter.raw();
+			var raw = meter.raw(quorum);
 			var v = Math.max(raw.t, raw.b);
 			var hz = Math.max(raw.l, raw.r);
 			v = v > 0 ? v + 1 / h : 0; // +1 строка анализа — без тонкой тёмной каймы
@@ -828,6 +862,80 @@
 		var text = 'полосы сверху/снизу ' + percent(bars.t) + ', по бокам ' + percent(bars.l);
 		if (raw) text += ' [края: верх ' + percent(raw.t) + ', низ ' + percent(raw.b) + ', лево ' + percent(raw.l) + ', право ' + percent(raw.r) + ']';
 		return text;
+	}
+
+	// Полосы по превью RUTUBE (preview.rutube.ru, анимированный WebP — кадры со всего ролика).
+	// Сам RUTUBE отдаёт превью без CORS, поэтому берём его через wsrv.nl: тот отдаёт с CORS,
+	// уменьшает до ширины анализа и с n=-1 складывает все кадры в одну полосу сверху вниз.
+	// Первый кадр отдельным запросом — чтобы знать высоту кадра в полосе. done(bars | null, note, raw)
+	function barsFromRutubePreview(videoId, done) {
+		var meter = createBarsMeter();
+		var preview = 'https://preview.rutube.ru/preview/' + videoId + '.webp';
+		var base = PREVIEW_PROXY + encodeURIComponent(preview) + '&w=' + DETECT_SAMPLE_WIDTH + '&output=png';
+		var first = null;
+		var strip = null;
+		var left = 2;
+		var finished = false;
+		var timer = null;
+
+		function finish(note) {
+			if (finished) return;
+			finished = true;
+			clearTimeout(timer);
+
+			if (first && strip) {
+				var fw = first.naturalWidth || first.width;
+				var fh = first.naturalHeight || first.height;
+				var count = fh ? Math.round((strip.naturalHeight || strip.height) / fh) : 0;
+				for (var k = 0; k < count; k++) {
+					try {
+						meter.add(strip, fw, fh, 0, k * fh);
+					} catch (e) {}
+				}
+			} else if (first) {
+				try {
+					meter.add(first, first.naturalWidth || first.width, first.naturalHeight || first.height);
+				} catch (e) {}
+			}
+
+			if (!meter.solid) return done(null, note || (meter.good ? 'кадры превью тёмные' : 'превью нет или не загрузилось'));
+			done(meter.bars(PREVIEW_QUORUM), 'по ' + meter.good + ' кадрам превью, светлых ' + meter.solid, meter.raw(PREVIEW_QUORUM));
+		}
+
+		function load(url, put) {
+			var img = new Image();
+			img.crossOrigin = 'anonymous';
+			img.onload = function () {
+				if (finished) return;
+				put(img);
+				if (--left <= 0) finish();
+			};
+			img.onerror = function () {
+				if (--left <= 0) finish();
+			};
+			img.src = url;
+		}
+
+		if (!meter.ok) {
+			done(null, 'canvas недоступен');
+			return noop;
+		}
+
+		timer = setTimeout(function () {
+			finish('превью не ответило за ' + PREVIEW_TIMEOUT / 1000 + ' с');
+		}, PREVIEW_TIMEOUT);
+
+		load(base, function (img) {
+			first = img;
+		});
+		load(base + '&n=-1', function (img) {
+			strip = img;
+		});
+
+		return function cancel() {
+			finished = true;
+			clearTimeout(timer);
+		};
 	}
 
 	// Полосы по картинкам (превью ролика). done(bars | null, note)
@@ -972,8 +1080,9 @@
 		return Lampa.Storage.field('player_hls_method') === 'hlsjs' || chrome > 120 || !nativeHls;
 	}
 
-	// thumbUrl — превью ролика: по нему ищем полосы, если кадр видео не читается
-	function createBackgroundVideo(url, handlers, thumbUrl) {
+	// videoId — ID ролика RUTUBE: по его превью (все кадры ролика) ищем полосы в первую очередь.
+	// knownAspect — пропорции из плейлиста: встроенный плеер на части ТВ отдаёт размер кадра 0x0
+	function createBackgroundVideo(url, handlers, videoId, knownAspect) {
 		var html = $(
 			'<div class="cardify-trailer">' +
 				'<video class="cardify-trailer__video" muted playsinline webkit-playsinline preload="auto"></video>' +
@@ -989,7 +1098,8 @@
 		var soundBlocked = false; // браузер не дал включить звук — до смены настройки не пробуем
 		var bars = NO_BARS;
 		var cancelDetect = noop;
-		var cancelThumb = noop;
+		var cancelPreview = noop;
+		var preview = { state: '', bars: null, waiting: false, timer: null };
 
 		// Стартуем всегда без звука: беззвучный автозапуск разрешён везде, звук включаем при показе
 		video.muted = true;
@@ -998,7 +1108,7 @@
 
 		// animate — плавно, когда граница уточнилась уже после показа
 		function layout(animate) {
-			var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+			var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : knownAspect || 16 / 9;
 			var zoom = zoomSetting();
 			var transition = animate ? 'left .8s ease, top .8s ease, width .8s ease, height .8s ease' : '';
 			video.style.webkitTransition = transition;
@@ -1007,25 +1117,57 @@
 			placeElement(video, coverRect(aspect, zoom.auto ? bars : NO_BARS, zoom.auto ? 1 : zoom.scale));
 		}
 
+		// Превью грузится сразу, параллельно с видео: к старту видео кадр обычно уже готов
+		function loadPreview() {
+			if (!zoomSetting().auto || !videoId) return;
+			preview.state = 'loading';
+			cancelPreview = barsFromRutubePreview(videoId, function (found, note, raw) {
+				if (dead) return;
+				preview.state = 'done';
+				preview.bars = found;
+				log('trailer: превью RUTUBE —', found ? barsText(found, raw) : 'полосы не определить', '(' + note + ')');
+				if (preview.waiting) {
+					preview.waiting = false;
+					clearTimeout(preview.timer);
+					framingAfterPreview();
+				}
+			});
+		}
+
 		function startFraming() {
 			if (!zoomSetting().auto) return reveal();
 
-			var cancelVideo = watchVideoBars(
+			if (preview.state === 'done') return framingAfterPreview();
+			if (preview.state === 'loading') {
+				preview.waiting = true;
+				preview.timer = setTimeout(function () {
+					if (!preview.waiting) return;
+					preview.waiting = false;
+					log('trailer: превью не успело — смотрю кадры видео');
+					watchFrames();
+				}, PREVIEW_WAIT);
+				return;
+			}
+			watchFrames();
+		}
+
+		function framingAfterPreview() {
+			if (preview.bars) {
+				bars = preview.bars;
+				return reveal();
+			}
+			watchFrames();
+		}
+
+		// Запасной путь: кадры самого видео (читаются не везде — см. лог)
+		function watchFrames() {
+			if (revealed || dead) return;
+			cancelDetect = watchVideoBars(
 				video,
-				function (found, note, raw, good) {
+				function (found, note, raw) {
 					bars = found;
 					log('trailer: кадр (' + mode + ') —', barsText(found, raw), '(' + note + ')');
 					reveal();
-
-					// кадры есть, но все чёрные — возможно, видео рисуется мимо canvas; подсказка по превью
-					if (!good && thumbUrl) {
-						cancelThumb = barsFromImages([thumbUrl], function (thumbBars, n2, thumbRaw) {
-							if (dead || !thumbBars || bars !== NO_BARS) return;
-							bars = thumbBars;
-							log('trailer: кадр по превью —', barsText(thumbBars, thumbRaw), '(' + n2 + ')');
-							layout(true);
-						});
-					}
 				},
 				function (found, note, raw) {
 					bars = found;
@@ -1034,23 +1176,10 @@
 				},
 				function (note) {
 					if (revealed || dead) return;
-					if (!thumbUrl) {
-						log('trailer: кадр —', note + ', без обрезки');
-						return reveal();
-					}
-					log('trailer: кадр (' + mode + ') —', note + ', ищу полосы по превью');
-					cancelThumb = barsFromImages([thumbUrl], function (found, n2, raw) {
-						if (found) bars = found;
-						log('trailer: кадр по превью —', barsText(bars, raw), '(' + n2 + ')');
-						reveal();
-					});
+					log('trailer: кадр (' + mode + ') —', note + ', без обрезки');
+					reveal();
 				}
 			);
-
-			cancelDetect = function () {
-				cancelVideo();
-				cancelThumb();
-			};
 		}
 
 		function onResize() {
@@ -1198,7 +1327,9 @@
 			if (dead) return;
 			dead = true;
 			clearTimeout(startTimer);
+			clearTimeout(preview.timer);
 			cancelDetect();
+			cancelPreview();
 			window.removeEventListener('resize', onResize);
 			if (hls) {
 				try {
@@ -1247,6 +1378,7 @@
 			fail('media error ' + (err ? err.code + (err.message ? ' ' + err.message : '') : ''));
 		});
 
+		loadPreview();
 		attach(preferHlsJs(nativeHls) ? 'hls.js' : 'native');
 
 		return {
@@ -1962,9 +2094,10 @@
 			sync();
 		}
 
-		function playRutube(item, streamUrl, onFail) {
+		function playRutube(item, streamUrl, onFail, info) {
+			var id = rutubeId(item.video_url || item.embed_url || item.url);
 			mountTrailer(function (handlers) {
-				return createBackgroundVideo(streamUrl, handlers, item.thumbnail_url);
+				return createBackgroundVideo(streamUrl, handlers, id, info && info.aspect);
 			}, onFail);
 		}
 
@@ -1978,7 +2111,7 @@
 				log('trailer: роликов HD-качества нет — беру лучший из найденных (' + soap.info.text + ')', '«' + soap.item.title + '»');
 				return playRutube(soap.item, soap.url, function () {
 					fallback();
-				});
+				}, soap.info);
 			}
 
 			var item = list[i] || {};
@@ -2002,7 +2135,7 @@
 						// упал посреди показа — на слайдшоу; не стартовал — следующий ролик
 						if (wasStarted) fallback();
 						else tryCandidates(list, i + 1, soap);
-					});
+					}, info);
 				},
 				function () {
 					tryCandidates(list, i + 1, soap);
