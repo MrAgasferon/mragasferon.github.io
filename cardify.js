@@ -24,7 +24,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '3.4';
+	var VERSION = '3.5';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 4;     // сколько найденных роликов пробовать по очереди (с проверкой на мыло)
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -1504,14 +1504,23 @@
 		}, 100);
 	}
 
-	// Порядок: трейлеры и тизеры — язык контента → английский → прочие, внутри языка
-	// «official trailer» → тип Trailer → «трейлер» в названии → Teaser; затем остальные ролики; свежие раньше.
-	// Lampa кладёт в карточку ролики TMDB на языке контента и на английском вместе
+	// Выбор ролика YouTube из данных TMDB (Lampa кладёт в карточку ролики на языке контента и на английском).
+	// iso_639_1 — пометка редактора TMDB, а не язык звука, поэтому смотрим и на название — правила те же,
+	// что на RUTUBE. Группы по языку:
+	//   0 — пометка своего языка и название на нём (или «русский/дубляж»);
+	//   1 — пометка своего языка, но название латиницей («Official Trailer») — возможно, оригинал;
+	//   2 — английский, а также «субтитры / оригинал / eng» в названии при любой пометке;
+	//   3 — прочие языки.
+	// Порядок: трейлеры и тизеры раньше прочих роликов → группа → HD (size ≥ 720 по TMDB) →
+	// официальный канал (official) → «official trailer» / Trailer / «трейлер» / Teaser → свежие
+	var YT_HD_SIZE = 720;
+
 	function youtubeCandidates(e) {
 		var d = e.data || {};
 		var vids = d.videos || (d.movie && d.movie.videos) || (d.tv && d.tv.videos);
 		var list = vids && vids.results ? vids.results : [];
 		var lang = contentLang();
+		var cyrillicLang = lang === 'ru' || lang === 'uk' || lang === 'be';
 
 		function rank(v) {
 			var name = String(v.name || '').toLowerCase();
@@ -1522,7 +1531,20 @@
 			return 4;
 		}
 
-		return list
+		function group(v) {
+			var name = String(v.name || '');
+			var marks = langScore(name); // +1 «русский/дубляж», -1 «субтитры/оригинал/eng»
+			if (marks < 0) return 2;
+			if (v.iso_639_1 === lang) {
+				if (cyrillicLang && !/[а-яёіїєґ]/i.test(name) && marks <= 0) return 1;
+				return 0;
+			}
+			if (marks > 0) return 1; // чужая пометка, но в названии явно наш язык
+			if (v.iso_639_1 === 'en') return 2;
+			return 3;
+		}
+
+		var ranked = list
 			.filter(function (v) {
 				return v && v.key && (!v.site || v.site === 'YouTube');
 			})
@@ -1530,16 +1552,39 @@
 				return {
 					id: v.key,
 					title: v.name || '',
+					iso: v.iso_639_1 || '—',
+					size: v.size || 0,
+					official: v.official === true,
 					rank: rank(v),
-					lang: v.iso_639_1 === lang ? 0 : v.iso_639_1 === 'en' ? 1 : 2,
+					group: group(v),
+					hd: !v.size || v.size >= YT_HD_SIZE ? 1 : 0, // без размера — не штрафуем
 					time: new Date(v.published_at || 0).getTime() || 0
 				};
 			})
 			.sort(function (a, b) {
-				// язык важнее типа, но ролики «за кадром» и клипы — после всех трейлеров и тизеров
-				return (a.rank > 3) - (b.rank > 3) || a.lang - b.lang || a.rank - b.rank || b.time - a.time;
+				return (
+					(a.rank > 3) - (b.rank > 3) ||
+					a.group - b.group ||
+					b.hd - a.hd ||
+					(b.official ? 1 : 0) - (a.official ? 1 : 0) ||
+					a.rank - b.rank ||
+					b.time - a.time
+				);
 			})
 			.slice(0, MAX_TRAILER_CANDIDATES);
+
+		if (ranked.length) {
+			log(
+				'trailer: YouTube, лучшие —',
+				ranked
+					.slice(0, 3)
+					.map(function (c) {
+						return '«' + c.title + '» [' + c.iso + ', гр.' + c.group + (c.size ? ', ' + c.size + 'p' : '') + (c.official ? ', офиц.' : '') + ']';
+					})
+					.join(' | ')
+			);
+		}
+		return ranked;
 	}
 
 	function createYouTubeBackground(videoId, handlers) {
