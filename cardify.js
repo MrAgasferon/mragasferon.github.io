@@ -23,9 +23,9 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '2.9';
+	var VERSION = '3.0';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
-	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
+	var MAX_TRAILER_CANDIDATES = 4;     // сколько найденных роликов пробовать по очереди (с проверкой на мыло)
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
 	var DEFAULT_SEARCH_PROXY = 'https://rutube-search.root-1a7.workers.dev/';
 	var RUTUBE_URL_RE = /^https?:\/\/(?:www\.)?rutube\.ru\/(?:play\/embed|video\/private|video|shorts)\/([\da-f]{32,})/i;
@@ -39,20 +39,36 @@
 
 	// Язык трейлеров RUTUBE: первый запрос с пометкой языка; в названии — бонус за свой язык,
 	// штраф за английский / оригинал / субтитры. Для других языков интерфейса — без этого шага
+	// official — первый запрос (официальный дубляж), query — второй; найденное по обоим объединяется
 	var LANG_RULES = {
 		ru: {
+			official: 'официальный русский трейлер',
 			query: 'русский трейлер',
+			isOfficial: /официальн/,
 			good: /русск|на русском|дубляж|дублир|\brus\b/,
-			bad: /англ|english|\beng\b|оригинал|original|субтитр|subtitle|\bsubs?\b/
+			bad: /англ|english|\beng\b|оригинал|original|субтитр|subtitle|\bsubs?\b|любительск|фанатск/
 		},
 		uk: {
+			official: 'офіційний український трейлер',
 			query: 'український трейлер',
+			isOfficial: /офіційн|официальн/,
 			good: /українськ|українською|\bukr\b|\bукр\b/,
-			bad: /англ|english|\beng\b|оригінал|original|субтитр|subtitle|\bsubs?\b/
+			bad: /англ|english|\beng\b|оригінал|original|субтитр|subtitle|\bsubs?\b|аматорськ|любительск/
+		},
+		en: {
+			official: 'official trailer',
+			query: 'trailer',
+			isOfficial: /official/,
+			good: /english|\beng\b/,
+			bad: /русск|дубляж|дублир|українськ/
 		}
 	};
+	LANG_RULES.be = LANG_RULES.ru; // белорусский интерфейс — контент RUTUBE русский
+
+	var GOOD_WIDTH = 1200; // «не мыло»: есть вариант хотя бы HD-класса (≈1280 px по ширине)
 
 	var SCORE = {
+		OFFICIAL: 100,
 		LANG_MATCH: 150,
 		EXACT_MATCH: 300,
 		YEAR_MATCH: 100,
@@ -167,14 +183,19 @@
 		return (rule.good.test(t) ? 1 : 0) - (rule.bad.test(t) ? 1 : 0);
 	}
 
-	// Свой язык вперёд, английский назад; в остальном порядок сохраняется
+	function isOfficialTitle(title) {
+		var rule = langRule();
+		return !!rule && rule.isOfficial.test(cleanString(title));
+	}
+
+	// Свой язык вперёд, чужой назад; при равном языке официальные вперёд; иначе порядок сохраняется
 	function rankByLang(list) {
 		return list
 			.map(function (item, i) {
-				return { item: item, i: i, l: langScore(item.title) };
+				return { item: item, i: i, l: langScore(item.title), o: isOfficialTitle(item.title) ? 1 : 0 };
 			})
 			.sort(function (a, b) {
-				return b.l - a.l || a.i - b.i;
+				return b.l - a.l || b.o - a.o || a.i - b.i;
 			})
 			.map(function (x) {
 				return x.item;
@@ -311,6 +332,7 @@
 			score += matching.length * SCORE.WORD_MATCH - (titleWords.length - matching.length) * SCORE.EXTRA_WORD_PENALTY;
 			score += r.duration > 120 ? SCORE.DURATION_BONUS : SCORE.DURATION_PENALTY;
 			score += langScore(r.title) * SCORE.LANG_MATCH;
+			if (isOfficialTitle(r.title)) score += SCORE.OFFICIAL;
 
 			return score;
 		}
@@ -346,7 +368,20 @@
 		}
 
 		var rule = langRule();
-		var trailerTypes = (rule ? [rule.query] : []).concat(['трейлер', 'trailer', 'тизер']);
+		var trailerTypes = (rule ? [rule.official, rule.query] : []).concat(['трейлер', 'trailer', 'тизер']).filter(function (q, i, all) {
+			return all.indexOf(q) === i;
+		});
+		var officialFound = []; // найденное по «официальному» запросу ждёт результатов второго запроса
+
+		function mergeById(a, b) {
+			var seen = {};
+			return a.concat(b).filter(function (r) {
+				var key = rutubeId(r.url) || r.url;
+				if (seen[key]) return false;
+				seen[key] = true;
+				return true;
+			});
+		}
 
 		function searchStep(index) {
 			if (finished) return;
@@ -363,6 +398,15 @@
 					var raw = data && data.results ? data.results.length : 0;
 					var list = raw ? filterResults(data.results, query) : [];
 					log('trailer: поиск «' + query + '» —', raw + ' роликов, подходит ' + list.length);
+
+					// официальные нашлись — добираем «просто языковые» как запас на случай мыла
+					if (rule && index === 0 && list.length) {
+						officialFound = list;
+						return searchStep(1);
+					}
+					if (rule && index === 1 && officialFound.length) {
+						return done(mergeById(officialFound, list));
+					}
 					if (list.length) done(list);
 					else searchStep(index + 1);
 				},
@@ -370,6 +414,8 @@
 					if (!searchProxy && isCorsBlocked(xhr)) {
 						useProxy();
 						searchStep(index);
+					} else if (rule && index === 1 && officialFound.length) {
+						done(officialFound); // второй запрос не прошёл — хватит официальных
 					} else {
 						log('trailer: поиск RUTUBE не удался' + (searchProxy ? ' (через прокси)' : '') + ' —', errInfo(xhr));
 						if (searchProxy && xhr && xhr.status === 0) {
@@ -444,11 +490,12 @@
 		var target = trailerQuality();
 		var called = false;
 
-		function finish(url, note) {
+		// info — лучший доступный вариант { width, text }; без плейлиста неизвестен
+		function finish(url, note, info) {
 			if (called) return;
 			called = true;
 			log('trailer: поток', note || '', url);
-			callback(url);
+			callback(url, info || null);
 		}
 
 		net.timeout(10000);
@@ -470,6 +517,7 @@
 					var url = /^https?:\/\//i.test(next) ? next : next.charAt(0) === '/' ? origin + next : base + next;
 
 					streams.push({
+						width: res ? parseInt(res[1], 10) : 0,
 						height: res ? parseInt(res[2], 10) : 0,
 						bandwidth: bw ? parseInt(bw[1], 10) : 0,
 						url: url
@@ -478,8 +526,19 @@
 
 				if (!streams.length) return finish(masterUrl, '(master, вариантов нет)');
 
+				// класс качества по ширине: у «широких» роликов высота меньше (1920×800 — это 1080p)
+				var best = 0;
+				var bestText = '';
+				streams.forEach(function (st) {
+					var wClass = Math.max(st.width, Math.round((st.height * 16) / 9));
+					if (wClass > best) {
+						best = wClass;
+						bestText = st.width + 'x' + st.height;
+					}
+				});
+
 				var chosen = streams[chooseLevel(streams, target)];
-				finish(chosen.url, (chosen.height || '?') + 'p из ' + heightsOf(streams) + ', предел ' + target + 'p');
+				finish(chosen.url, (chosen.height || '?') + 'p из ' + heightsOf(streams) + ', предел ' + target + 'p', { width: best, text: bestText });
 			},
 			function (xhr) {
 				finish(masterUrl, '(master, плейлист не прочитан — ' + errInfo(xhr) + ')');
@@ -515,8 +574,8 @@
 						log('trailer: play/options', videoId, '— нет m3u8', json && json.detail ? json.detail : '');
 						return onFail();
 					}
-					variant = pickVariant(master, function (streamUrl) {
-						if (!aborted) onSuccess(streamUrl);
+					variant = pickVariant(master, function (streamUrl, info) {
+						if (!aborted) onSuccess(streamUrl, info);
 					});
 				},
 				function (xhr) {
@@ -905,12 +964,9 @@
 		return !!Hls && typeof Hls.isSupported === 'function' && Hls.isSupported();
 	}
 
-	// forFrames — нужен доступ к кадрам («Авто»): у встроенного HLS кадр видео с чужого домена
-	// не читается (SecurityError), у hls.js (MSE) — читается
-	function preferHlsJs(nativeHls, forFrames) {
+	function preferHlsJs(nativeHls) {
 		if (!hlsJsAvailable()) return false;
 		if (Lampa.Platform.is('tizen') || Lampa.Platform.is('orsay')) return false;
-		if (forFrames) return true;
 
 		var chrome = typeof Lampa.Platform.chromeVersion === 'function' ? Lampa.Platform.chromeVersion() : 0;
 		return Lampa.Storage.field('player_hls_method') === 'hlsjs' || chrome > 120 || !nativeHls;
@@ -1191,12 +1247,7 @@
 			fail('media error ' + (err ? err.code + (err.message ? ' ' + err.message : '') : ''));
 		});
 
-		var forFrames = zoomSetting().auto;
-		var firstMode = preferHlsJs(nativeHls, forFrames) ? 'hls.js' : 'native';
-		if (forFrames && firstMode === 'hls.js' && !preferHlsJs(nativeHls, false)) {
-			log('trailer: «Авто» — беру hls.js вместо встроенного HLS, чтобы читать кадры');
-		}
-		attach(firstMode);
+		attach(preferHlsJs(nativeHls) ? 'hls.js' : 'native');
 
 		return {
 			render: function () {
@@ -1911,30 +1962,50 @@
 			sync();
 		}
 
-		function tryCandidates(list, i) {
+		function playRutube(item, streamUrl, onFail) {
+			mountTrailer(function (handlers) {
+				return createBackgroundVideo(streamUrl, handlers, item.thumbnail_url);
+			}, onFail);
+		}
+
+		// Кандидаты по порядку. Ролик без варианта HD-класса — «мыло»: запоминаем лучший из таких
+		// и пробуем следующий. Хорошего нет — играем лучший из мыльных
+		function tryCandidates(list, i, soap) {
 			if (destroyed) return;
-			if (i >= list.length) return fallback();
+
+			if (i >= list.length) {
+				if (!soap) return fallback();
+				log('trailer: роликов HD-качества нет — беру лучший из найденных (' + soap.info.text + ')', '«' + soap.item.title + '»');
+				return playRutube(soap.item, soap.url, function () {
+					fallback();
+				});
+			}
 
 			var item = list[i] || {};
 			var id = rutubeId(item.video_url || item.embed_url || item.url);
-			if (!id) return tryCandidates(list, i + 1);
+			if (!id) return tryCandidates(list, i + 1, soap);
 
 			log('trailer: ролик ' + (i + 1) + '/' + list.length, '«' + item.title + '»', id);
 
 			abortStream = resolveStream(
 				id,
-				function (streamUrl) {
+				function (streamUrl, info) {
 					if (destroyed) return;
-					mountTrailer(function (handlers) {
-						return createBackgroundVideo(streamUrl, handlers, item.thumbnail_url);
-					}, function (wasStarted) {
+
+					if (info && info.width && info.width < GOOD_WIDTH) {
+						log('trailer: ролик ' + (i + 1) + ' — максимум ' + info.text + ', мыло, ищу лучше');
+						var better = !soap || info.width > soap.info.width;
+						return tryCandidates(list, i + 1, better ? { item: item, url: streamUrl, info: info } : soap);
+					}
+
+					playRutube(item, streamUrl, function (wasStarted) {
 						// упал посреди показа — на слайдшоу; не стартовал — следующий ролик
 						if (wasStarted) fallback();
-						else tryCandidates(list, i + 1);
+						else tryCandidates(list, i + 1, soap);
 					});
 				},
 				function () {
-					tryCandidates(list, i + 1);
+					tryCandidates(list, i + 1, soap);
 				}
 			);
 		}
@@ -1968,7 +2039,7 @@
 				movie,
 				isTv,
 				function (list) {
-					tryCandidates(list.slice(0, MAX_TRAILER_CANDIDATES), 0);
+					tryCandidates(list.slice(0, MAX_TRAILER_CANDIDATES), 0, null);
 				},
 				fallback
 			);
