@@ -3,8 +3,10 @@
  *
  * Основа — украинский мод Cardify. Изменения:
  *  - убраны обфускация, мёртвый код и блокировка bylampa.online;
- *  - фоновый трейлер берётся с RUTUBE вместо YouTube (поиск — как в плагине rutube_trailer:
- *    кэш trailer.rootu.top по TMDB id → поиск RUTUBE), играет через <video> + HLS;
+ *  - источник фонового трейлера на выбор: RUTUBE (по умолчанию; поиск как в плагине rutube_trailer:
+ *    кэш trailer.rootu.top по TMDB id → поиск RUTUBE, играет через <video> + HLS) или YouTube
+ *    (ролики из данных TMDB, IFrame API);
+ *  - «Авто» в масштабе: кадр под экран, вшитые чёрные полосы RUTUBE-роликов находятся и обрезаются;
  *  - трейлер и слайдшоу ставятся на паузу, пока открыт плеер или активна другая карточка;
  *  - интерфейс через Lampa.Lang (ru / uk / en).
  * Ключи настроек прежние (cardify_*), старые значения подхватятся.
@@ -19,7 +21,7 @@
 	// Константы
 	// ---------------------------------------------------------------------------
 
-	var VERSION = '2.3';
+	var VERSION = '2.4';
 	var MAX_TRAILER_HEIGHT = 1080;      // потолок качества фонового трейлера (высота кадра)
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
@@ -478,12 +480,18 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Фоновое видео
+	// Фоновое видео: общие настройки и кадрирование
 	// ---------------------------------------------------------------------------
 
-	function zoomScale(value) {
-		if (value === true) value = '33'; // старый формат настройки (trigger)
-		return 1 + (parseInt(value, 10) || 0) / 100;
+	var NO_BARS = { t: 0, b: 0, l: 0, r: 0 };
+	var DETECT_SAMPLE_WIDTH = 128; // ширина уменьшенного кадра для поиска полос, px
+	var DETECT_INTERVAL = 500;     // мс между пробами кадра
+	var DETECT_SAMPLES = 3;        // сколько светлых кадров нужно для решения
+	var DETECT_MAX_ATTEMPTS = 16;  // ~8 с проб, дальше — без обрезки
+	var DARK_LUMA = 32;            // яркость (0–255), ниже которой пиксель считается чёрным
+
+	function trailerSource() {
+		return Lampa.Storage.field('cardify_trailers_source') === 'youtube' ? 'youtube' : 'rutube';
 	}
 
 	// 0…1 из настройки «Громкость фонового трейлера» (0–100 % с шагом 5)
@@ -492,17 +500,213 @@
 		return Math.max(0, Math.min(100, v)) / 100;
 	}
 
-	function applyVideoLook(el) {
-		var blur = parseInt(Lampa.Storage.field('cardify_trailers_blur'), 10) || 0;
-		var scale = zoomScale(Lampa.Storage.field('cardify_trailers_zoom'));
-		var filter = blur > 0 ? 'blur(' + blur + 'px)' : '';
-		var transform = scale !== 1 ? 'scale(' + scale + ') translateZ(0)' : '';
+	// «Масштаб видео»: auto — под экран с обрезкой вшитых полос; none/+N — ручной режим
+	function zoomSetting() {
+		var v = Lampa.Storage.field('cardify_trailers_zoom');
+		if (v === true) v = '33'; // старый формат настройки (trigger)
+		if (v === false) v = '0';
+		if (v === undefined || v === null || v === '' || v === 'auto') return { auto: true, scale: 1 };
+		return { auto: false, scale: 1 + (parseInt(v, 10) || 0) / 100 };
+	}
 
+	function applyBlur(el) {
+		var blur = parseInt(Lampa.Storage.field('cardify_trailers_blur'), 10) || 0;
+		var filter = blur > 0 ? 'blur(' + blur + 'px)' : '';
 		el.style.webkitFilter = filter;
 		el.style.filter = filter;
-		el.style.webkitTransform = transform;
-		el.style.transform = transform;
 	}
+
+	// Размер и положение кадра (px экрана), при которых картинка без полос
+	// закрывает экран целиком; scale — ручное увеличение сверху
+	function coverRect(aspect, bars, scale) {
+		var W = window.innerWidth || 1920;
+		var H = window.innerHeight || 1080;
+		var fx = 1 - bars.l - bars.r;
+		var fy = 1 - bars.t - bars.b;
+		var contentAspect = (aspect * fx) / fy;
+		var cw, ch;
+
+		if (contentAspect > W / H) {
+			ch = H;
+			cw = H * contentAspect;
+		} else {
+			cw = W;
+			ch = W / contentAspect;
+		}
+		cw *= scale;
+		ch *= scale;
+
+		var ew = cw / fx;
+		var eh = ch / fy;
+		return {
+			width: ew,
+			height: eh,
+			left: W / 2 - (bars.l * ew + cw / 2),
+			top: H / 2 - (bars.t * eh + ch / 2)
+		};
+	}
+
+	function placeElement(el, rect) {
+		el.style.left = Math.round(rect.left) + 'px';
+		el.style.top = Math.round(rect.top) + 'px';
+		el.style.width = Math.round(rect.width) + 'px';
+		el.style.height = Math.round(rect.height) + 'px';
+	}
+
+	function percent(x) {
+		return Math.round(x * 100) + '%';
+	}
+
+	// Один кадр → доли полос. 'empty' — кадр не читается (прозрачный), 'dark' — по кадру не понять
+	function analyzeFrame(video, canvas, ctx) {
+		var vw = video.videoWidth;
+		var vh = video.videoHeight;
+		if (!vw || !vh) return null;
+
+		var w = DETECT_SAMPLE_WIDTH;
+		var h = Math.max(16, Math.round((w * vh) / vw));
+		if (canvas.width !== w) canvas.width = w;
+		if (canvas.height !== h) canvas.height = h;
+
+		ctx.drawImage(video, 0, 0, w, h);
+		var px = ctx.getImageData(0, 0, w, h).data; // SecurityError, если кадр с чужого домена без CORS
+
+		var opaque = false;
+		for (var a = 3; a < px.length; a += 28) {
+			if (px[a] !== 0) {
+				opaque = true;
+				break;
+			}
+		}
+		if (!opaque) return 'empty';
+
+		function bright(x, y) {
+			var o = (y * w + x) * 4;
+			return 0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2] > DARK_LUMA;
+		}
+
+		// строка/столбец «чёрные», если светлых пикселей не больше 2 % (шум, мелкий логотип)
+		function rowDark(y) {
+			var n = 0;
+			for (var x = 0; x < w; x++) if (bright(x, y)) n++;
+			return n <= w * 0.02;
+		}
+
+		function colDark(x, y0, y1) {
+			var n = 0;
+			for (var y = y0; y < y1; y++) if (bright(x, y)) n++;
+			return n <= (y1 - y0) * 0.02;
+		}
+
+		var top = 0;
+		while (top < h && rowDark(top)) top++;
+		if (top >= h) return 'dark';
+
+		var bottom = 0;
+		while (bottom < h - top && rowDark(h - 1 - bottom)) bottom++;
+
+		var left = 0;
+		while (left < w && colDark(left, top, h - bottom)) left++;
+
+		var right = 0;
+		while (right < w - left && colDark(w - 1 - right, top, h - bottom)) right++;
+
+		// логотип студии на чёрном и т.п.
+		if (w - left - right < w * 0.4 || h - top - bottom < h * 0.4) return 'dark';
+
+		// тёмная сцена — край картинки неотличим от полосы
+		var lit = 0;
+		var total = 0;
+		for (var y = top; y < h - bottom; y += 2) {
+			for (var x = left; x < w - right; x += 2) {
+				total++;
+				if (bright(x, y)) lit++;
+			}
+		}
+		if (lit < total * 0.3) return 'dark';
+
+		// полосы считаем симметричными: так не мешают субтитры в нижней полосе и тёмное небо сверху
+		return {
+			v: Math.max(top, bottom) / h,
+			hz: Math.max(left, right) / w,
+			rowStep: 1 / h,
+			colStep: 1 / w
+		};
+	}
+
+	// Несколько светлых кадров → общие полосы (минимум по кадрам: светлая сцена показывает
+	// настоящую границу картинки). Решение принимается один раз — кадр потом не прыгает
+	function detectBars(video, done) {
+		var canvas = document.createElement('canvas');
+		var ctx = null;
+		try {
+			ctx = canvas.getContext('2d', { willReadFrequently: true });
+		} catch (e) {}
+		if (!ctx) {
+			done(NO_BARS, 'canvas недоступен');
+			return noop;
+		}
+
+		var found = [];
+		var attempts = 0;
+		var empty = 0;
+		var finished = false;
+		var timer = null;
+
+		function finish(note) {
+			if (finished) return;
+			finished = true;
+			clearInterval(timer);
+			if (!found.length) return done(NO_BARS, note || 'светлых кадров нет');
+
+			var v = 1;
+			var hz = 1;
+			found.forEach(function (f) {
+				// +1 строка анализа, чтобы не осталось тонкой тёмной каймы
+				v = Math.min(v, f.v > 0 ? f.v + f.rowStep : 0);
+				hz = Math.min(hz, f.hz > 0 ? f.hz + f.colStep : 0);
+			});
+			if (v < 0.015) v = 0;
+			if (hz < 0.015) hz = 0;
+			v = Math.min(v, 0.3);
+			hz = Math.min(hz, 0.3);
+
+			done({ t: v, b: v, l: hz, r: hz }, 'по ' + found.length + ' кадрам');
+		}
+
+		function sample() {
+			if (finished) return;
+			attempts++;
+
+			var res;
+			try {
+				res = analyzeFrame(video, canvas, ctx);
+			} catch (e) {
+				return finish('кадр не читается: ' + e.name);
+			}
+
+			if (res === 'empty') {
+				if (++empty >= 3 && !found.length) return finish('кадр не читается');
+			} else if (res && res !== 'dark') {
+				found.push(res);
+			}
+
+			if (found.length >= DETECT_SAMPLES) return finish();
+			if (attempts >= DETECT_MAX_ATTEMPTS) finish('мало светлых кадров');
+		}
+
+		timer = setInterval(sample, DETECT_INTERVAL);
+		sample();
+
+		return function cancel() {
+			finished = true;
+			clearInterval(timer);
+		};
+	}
+
+	// ---------------------------------------------------------------------------
+	// RUTUBE: <video> + HLS
+	// ---------------------------------------------------------------------------
 
 	// Как в плеере Lampa (HlsStream.shouldUseProgram): hls.js на Chrome > 120,
 	// по настройке «Программный» или когда встроенного HLS нет; Tizen/Orsay — встроенный
@@ -528,15 +732,38 @@
 		var video = html.find('video')[0];
 		var hls = null;
 		var started = false;
+		var revealed = false;
 		var dead = false;
 		var startTimer = null;
 		var wantPlaying = false;  // паузу ставили мы (плеер, другая карточка) или браузер
 		var soundBlocked = false; // браузер не дал включить звук — до смены настройки не пробуем
+		var bars = NO_BARS;
+		var cancelDetect = noop;
 
-		// Стартуем всегда без звука: беззвучный автозапуск разрешён везде, звук включаем после старта
+		// Стартуем всегда без звука: беззвучный автозапуск разрешён везде, звук включаем при показе
 		video.muted = true;
 		video.loop = true;
-		applyVideoLook(video);
+		applyBlur(video);
+
+		function layout() {
+			var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+			var zoom = zoomSetting();
+			video.style.objectFit = 'fill';
+			placeElement(video, coverRect(aspect, zoom.auto ? bars : NO_BARS, zoom.auto ? 1 : zoom.scale));
+		}
+
+		function onResize() {
+			if (revealed && !dead) layout();
+		}
+
+		function reveal() {
+			if (revealed || dead) return;
+			revealed = true;
+			layout();
+			html.addClass('display');
+			handlers.onStart();
+			applyVolume();
+		}
 
 		function applyVolume() {
 			if (dead) return;
@@ -551,7 +778,7 @@
 				video.volume = volume; // доля от текущей громкости устройства
 			} catch (e) {}
 
-			if (!started || soundBlocked || !video.muted) return;
+			if (!revealed || soundBlocked || !video.muted) return;
 
 			video.muted = false;
 
@@ -661,6 +888,8 @@
 			if (dead) return;
 			dead = true;
 			clearTimeout(startTimer);
+			cancelDetect();
+			window.removeEventListener('resize', onResize);
 			if (hls) {
 				try {
 					hls.destroy();
@@ -679,12 +908,28 @@
 			clearTimeout(startTimer);
 			startTimer = null;
 			if (started || dead) return;
+
+			if (video.videoWidth && video.videoHeight && video.videoWidth < video.videoHeight) {
+				return fail('вертикальное видео ' + video.videoWidth + 'x' + video.videoHeight);
+			}
+
 			started = true;
-			log('trailer: играет (' + mode + ')', video.videoWidth + 'x' + video.videoHeight, '| громкость', Math.round(trailerVolume() * 100) + '%');
-			html.addClass('display');
-			handlers.onStart();
-			applyVolume();
+			log('trailer: играет (' + mode + ')', video.videoWidth + 'x' + video.videoHeight, '| громкость', percent(trailerVolume()));
+
+			// Показываем, когда кадр уже подогнан: во время проб видно статичный фон
+			if (zoomSetting().auto) {
+				cancelDetect = detectBars(video, function (found, note) {
+					bars = found;
+					log('trailer: кадр — полосы сверху/снизу ' + percent(found.t) + ', по бокам ' + percent(found.l), '(' + note + ')');
+					reveal();
+				});
+			} else {
+				reveal();
+			}
 		});
+
+		video.addEventListener('resize', onResize);
+		window.addEventListener('resize', onResize);
 
 		// страховка на случай, если loop не сработал (hls.js на старых WebView)
 		video.addEventListener('ended', function () {
@@ -713,6 +958,301 @@
 			updateVolume: function () {
 				soundBlocked = false;
 				applyVolume();
+			},
+			updateLook: function () {
+				applyBlur(video);
+				if (revealed) layout();
+			}
+		};
+	}
+
+	// ---------------------------------------------------------------------------
+	// YouTube: ролики из данных TMDB, IFrame API
+	// ---------------------------------------------------------------------------
+
+	var ytApiState = ''; // '' | loading | ready | failed
+	var ytWaiters = [];
+
+	function loadYouTubeApi(callback) {
+		if (window.YT && window.YT.Player) return callback(true);
+		if (ytApiState === 'failed') return callback(false);
+
+		ytWaiters.push(callback);
+		if (ytApiState === 'loading') return;
+		ytApiState = 'loading';
+		log('trailer: загружаю YouTube IFrame API');
+
+		try {
+			Lampa.Utils.putScript(['https://www.youtube.com/iframe_api'], noop);
+		} catch (e) {}
+
+		// ждём не дольше 10 с, без вечного опроса
+		var ticks = 0;
+		var timer = setInterval(function () {
+			var ok = !!(window.YT && window.YT.Player);
+			if (!ok && ++ticks < 100) return;
+
+			clearInterval(timer);
+			ytApiState = ok ? 'ready' : 'failed';
+			if (!ok) log('trailer: YouTube IFrame API не загрузился — до перезагрузки YouTube не пробую');
+
+			var list = ytWaiters;
+			ytWaiters = [];
+			list.forEach(function (cb) {
+				cb(ok);
+			});
+		}, 100);
+	}
+
+	// Порядок: «official trailer» → тип Trailer → «трейлер» в названии → Teaser → прочее;
+	// внутри — язык контента, затем английский; свежие раньше
+	function youtubeCandidates(e) {
+		var d = e.data || {};
+		var vids = d.videos || (d.movie && d.movie.videos) || (d.tv && d.tv.videos);
+		var list = vids && vids.results ? vids.results : [];
+		var lang = contentLang();
+
+		function rank(v) {
+			var name = String(v.name || '').toLowerCase();
+			if (/official trailer|офіційний трейлер|официальный трейлер/.test(name)) return 0;
+			if (v.type === 'Trailer') return 1;
+			if (/trailer|трейлер/.test(name)) return 2;
+			if (v.type === 'Teaser') return 3;
+			return 4;
+		}
+
+		return list
+			.filter(function (v) {
+				return v && v.key && (!v.site || v.site === 'YouTube');
+			})
+			.map(function (v) {
+				return {
+					id: v.key,
+					title: v.name || '',
+					rank: rank(v),
+					lang: v.iso_639_1 === lang ? 0 : v.iso_639_1 === 'en' ? 1 : 2,
+					time: new Date(v.published_at || 0).getTime() || 0
+				};
+			})
+			.sort(function (a, b) {
+				return a.rank - b.rank || a.lang - b.lang || b.time - a.time;
+			})
+			.slice(0, MAX_TRAILER_CANDIDATES);
+	}
+
+	function createYouTubeBackground(videoId, handlers) {
+		var html = $('<div class="cardify-trailer"><div class="cardify-trailer__yt"><div></div></div></div>');
+		var box = html.find('.cardify-trailer__yt')[0];
+		var player = null;
+		var ready = false;
+		var started = false;
+		var revealed = false;
+		var dead = false;
+		var wantPlaying = false;
+		var soundBlocked = false;
+		var startTimer = null;
+		var endTimer = null;
+		var revealTimer = null;
+		var soundTimer = null;
+
+		// Кадр внутри iframe не прочитать, а ролики YouTube почти всегда 16:9 — подгоняем 16:9 под экран.
+		// iframe вдвое выше картинки: заголовок и логотип YouTube у краёв уходят за экран
+		function layout() {
+			var zoom = zoomSetting();
+			var r = coverRect(16 / 9, NO_BARS, zoom.auto ? 1 : zoom.scale);
+			placeElement(box, { width: r.width, height: r.height * 2, left: r.left, top: r.top - r.height / 2 });
+		}
+
+		function onResize() {
+			if (!dead) layout();
+		}
+
+		function state() {
+			try {
+				return player.getPlayerState();
+			} catch (e) {
+				return -1;
+			}
+		}
+
+		function fail(reason) {
+			if (dead) return;
+			log('trailer: YouTube не играет —', reason);
+			var wasStarted = started;
+			destroy();
+			handlers.onError(wasStarted);
+		}
+
+		function play() {
+			if (dead) return;
+			wantPlaying = true;
+			if (!started && !startTimer) {
+				startTimer = setTimeout(function () {
+					fail('не стартовало за ' + TRAILER_START_TIMEOUT / 1000 + ' с');
+				}, TRAILER_START_TIMEOUT);
+			}
+			if (ready) {
+				try {
+					player.playVideo();
+				} catch (e) {}
+			}
+		}
+
+		function pause() {
+			if (dead) return;
+			wantPlaying = false;
+			if (!started) {
+				clearTimeout(startTimer);
+				startTimer = null;
+			}
+			if (ready) {
+				try {
+					player.pauseVideo();
+				} catch (e) {}
+			}
+		}
+
+		function applyVolume() {
+			if (dead || !ready) return;
+			var volume = trailerVolume();
+
+			try {
+				if (volume <= 0) return player.mute();
+				player.setVolume(Math.round(volume * 100)); // доля от текущей громкости устройства
+				if (!revealed || soundBlocked || !player.isMuted()) return;
+				player.unMute();
+			} catch (e) {
+				return;
+			}
+
+			clearTimeout(soundTimer);
+			soundTimer = setTimeout(function () {
+				if (dead || !wantPlaying || state() !== window.YT.PlayerState.PAUSED) return;
+				soundBlocked = true;
+				log('trailer: браузер не разрешил звук — играю без звука');
+				try {
+					player.mute();
+					player.playVideo();
+				} catch (e) {}
+			}, 500);
+		}
+
+		function reveal() {
+			if (revealed || dead) return;
+			revealed = true;
+			html.addClass('display');
+			handlers.onStart();
+			applyVolume();
+		}
+
+		// за 1.5 с до конца — в начало: экран «другие видео» YouTube не показываем
+		function watchEnd() {
+			clearInterval(endTimer);
+			endTimer = setInterval(function () {
+				try {
+					var duration = player.getDuration();
+					if (duration > 0 && duration - player.getCurrentTime() <= 1.5) player.seekTo(0, true);
+				} catch (e) {}
+			}, 250);
+		}
+
+		function onState(ev) {
+			var S = window.YT.PlayerState;
+			if (ev.data === S.PLAYING) {
+				clearTimeout(startTimer);
+				startTimer = null;
+				watchEnd();
+				if (!started) {
+					started = true;
+					log('trailer: играет (YouTube)', videoId, '| громкость', percent(trailerVolume()));
+					// небольшая пауза: в первые доли секунды YouTube показывает заголовок
+					revealTimer = setTimeout(reveal, 500);
+				}
+			} else if (ev.data === S.ENDED) {
+				try {
+					player.seekTo(0, true);
+					player.playVideo();
+				} catch (e) {}
+			} else if (ev.data === S.PAUSED) {
+				clearInterval(endTimer);
+			}
+		}
+
+		function destroy() {
+			if (dead) return;
+			dead = true;
+			clearTimeout(startTimer);
+			clearTimeout(revealTimer);
+			clearTimeout(soundTimer);
+			clearInterval(endTimer);
+			window.removeEventListener('resize', onResize);
+			try {
+				if (player) player.destroy();
+			} catch (e) {}
+			html.remove();
+		}
+
+		applyBlur(box);
+		layout();
+		window.addEventListener('resize', onResize);
+
+		loadYouTubeApi(function (ok) {
+			// после вставки в DOM: iframe создаётся на месте внутреннего div
+			setTimeout(function () {
+				if (dead) return;
+				if (!ok) return fail('IFrame API недоступен');
+				try {
+					player = new window.YT.Player(box.firstChild, {
+						width: '100%',
+						height: '100%',
+						videoId: videoId,
+						playerVars: {
+							autoplay: 0,
+							controls: 0,
+							disablekb: 1,
+							fs: 0,
+							iv_load_policy: 3,
+							modestbranding: 1,
+							playsinline: 1,
+							rel: 0,
+							mute: 1,
+							enablejsapi: 1
+						},
+						events: {
+							onReady: function () {
+								ready = true;
+								try {
+									player.mute();
+								} catch (e) {}
+								if (wantPlaying) play();
+							},
+							onStateChange: onState,
+							onError: function (ev) {
+								var code = ev ? ev.data : '?';
+								fail('ошибка ' + code + (code === 101 || code === 150 ? ' (встраивание запрещено владельцем)' : ''));
+							}
+						}
+					});
+				} catch (e) {
+					fail('плеер не создан: ' + e.message);
+				}
+			}, 0);
+		});
+
+		return {
+			render: function () {
+				return html;
+			},
+			play: play,
+			pause: pause,
+			destroy: destroy,
+			updateVolume: function () {
+				soundBlocked = false;
+				applyVolume();
+			},
+			updateLook: function () {
+				applyBlur(box);
+				layout();
 			}
 		};
 	}
@@ -1052,8 +1592,9 @@
 
 		// --- трейлер ---
 
-		function mountTrailer(url, onFail) {
-			trailer = createBackgroundVideo(url, {
+		// create(handlers) → плеер RUTUBE или YouTube с одинаковым интерфейсом
+		function mountTrailer(create, onFail) {
+			trailer = create({
 				onStart: function () {
 					backgrounds().addClass('nodisplay');
 				},
@@ -1085,7 +1626,9 @@
 				id,
 				function (streamUrl) {
 					if (destroyed) return;
-					mountTrailer(streamUrl, function (wasStarted) {
+					mountTrailer(function (handlers) {
+						return createBackgroundVideo(streamUrl, handlers);
+					}, function (wasStarted) {
 						// упал посреди показа — на слайдшоу; не стартовал — следующий ролик
 						if (wasStarted) fallback();
 						else tryCandidates(list, i + 1);
@@ -1097,7 +1640,31 @@
 			);
 		}
 
+		function tryYouTube(list, i) {
+			if (destroyed) return;
+			if (i >= list.length) return fallback();
+
+			var item = list[i];
+			log('trailer: YouTube ' + (i + 1) + '/' + list.length, '«' + item.title + '»', item.id);
+
+			mountTrailer(function (handlers) {
+				return createYouTubeBackground(item.id, handlers);
+			}, function (wasStarted) {
+				if (wasStarted) fallback();
+				else tryYouTube(list, i + 1);
+			});
+		}
+
 		function startTrailer() {
+			if (trailerSource() === 'youtube') {
+				var list = youtubeCandidates(e);
+				if (!list.length) {
+					log('trailer: в данных TMDB нет роликов YouTube');
+					return fallback();
+				}
+				return tryYouTube(list, 0);
+			}
+
 			abortSearch = searchTrailers(
 				movie,
 				isTv,
@@ -1129,10 +1696,17 @@
 			destroy: destroy,
 			updateVolume: function () {
 				if (trailer) trailer.updateVolume();
+			},
+			updateLook: function () {
+				if (trailer) trailer.updateLook();
 			}
 		};
 
-		log('карточка:', movie ? movie.title || movie.name : '(нет данных)', '| трейлер:', isOn('cardify_trailers_bg'), '| слайдшоу:', isOn('cardify_run_slideshow'));
+		log(
+			'карточка:', movie ? movie.title || movie.name : '(нет данных)',
+			'| трейлер:', isOn('cardify_trailers_bg') ? trailerSource() : 'выкл',
+			'| слайдшоу:', isOn('cardify_run_slideshow')
+		);
 
 		if (movie && isOn('cardify_trailers_bg')) startTrailer();
 		else if (movie && isOn('cardify_run_slideshow')) startSlideshow();
@@ -1147,11 +1721,17 @@
 	function addTranslations() {
 		Lampa.Lang.add({
 			cardify_trailers: { ru: 'Трейлеры', uk: 'Трейлери', en: 'Trailers' },
-			cardify_s_trailer: { ru: 'Фоновый трейлер (RUTUBE)', uk: 'Фоновий трейлер (RUTUBE)', en: 'Background trailer (RUTUBE)' },
+			cardify_s_source: { ru: 'Источник трейлеров', uk: 'Джерело трейлерів', en: 'Trailer source' },
+			cardify_s_source_descr: {
+				ru: 'RUTUBE — поиск по названию, YouTube — ролики из TMDB',
+				uk: 'RUTUBE — пошук за назвою, YouTube — ролики з TMDB',
+				en: 'RUTUBE: search by title, YouTube: videos from TMDB'
+			},
+			cardify_s_trailer: { ru: 'Фоновый трейлер', uk: 'Фоновий трейлер', en: 'Background trailer' },
 			cardify_s_trailer_descr: {
-				ru: 'Проигрывать трейлер с RUTUBE на фоне вместо картинок',
-				uk: 'Відтворювати трейлер з RUTUBE на фоні замість зображень',
-				en: 'Play a RUTUBE trailer in the background instead of images'
+				ru: 'Проигрывать трейлер на фоне вместо картинок',
+				uk: 'Відтворювати трейлер на фоні замість зображень',
+				en: 'Play a trailer in the background instead of images'
 			},
 			cardify_s_volume: { ru: 'Громкость фонового трейлера', uk: 'Гучність фонового трейлера', en: 'Background trailer volume' },
 			cardify_s_volume_descr: {
@@ -1163,7 +1743,13 @@
 			cardify_s_blur: { ru: 'Размытие фонового видео', uk: 'Розмиття фонового відео', en: 'Background video blur' },
 			cardify_s_blur_descr: { ru: 'Эффект размытия (blur) для фонового трейлера', uk: 'Ефект розмиття (blur) для фонового трейлера', en: 'Blur effect for the background trailer' },
 			cardify_s_zoom: { ru: 'Масштаб видео', uk: 'Масштабування відео', en: 'Video zoom' },
-			cardify_s_zoom_descr: { ru: 'Увеличение видео, чтобы скрыть чёрные полосы', uk: 'Збільшення відео для приховування чорних смуг', en: 'Zoom in to hide black bars' },
+			cardify_s_zoom_descr: {
+				ru: 'Авто — видео на весь экран, вшитые чёрные полосы обрезаются (поиск полос — только RUTUBE)',
+				uk: 'Авто — відео на весь екран, вшиті чорні смуги обрізаються (пошук смуг — лише RUTUBE)',
+				en: 'Auto: fill the screen and crop burned-in black bars (bar detection: RUTUBE only)'
+			},
+			cardify_s_zoom_auto: { ru: 'Авто — под экран', uk: 'Авто — під екран', en: 'Auto: fit screen' },
+			cardify_s_zoom_none: { ru: 'Без увеличения', uk: 'Без збільшення', en: 'No zoom' },
 			cardify_s_off: { ru: 'Выключено', uk: 'Вимкнено', en: 'Off' },
 			cardify_s_slideshow: { ru: 'Слайдшоу картинок', uk: 'Слайдшоу зображень', en: 'Image slideshow' },
 			cardify_s_slideshow_descr: {
@@ -1195,7 +1781,9 @@
 	var TRAILER_CSS =
 		'.cardify-trailer{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;overflow:hidden;pointer-events:none;background:#000;opacity:0;-webkit-transition:opacity .6s;transition:opacity .6s;will-change:opacity}\n' +
 		'.cardify-trailer.display{opacity:1}\n' +
-		'.cardify-trailer__video{position:absolute;top:0;left:0;width:100%;height:100%;-o-object-fit:cover;object-fit:cover;-webkit-transition:-webkit-transform .3s;transition:transform .3s}\n';
+		'.cardify-trailer__video{position:absolute;top:0;left:0;width:100%;height:100%;-o-object-fit:cover;object-fit:cover}\n' +
+		'.cardify-trailer__yt{position:absolute;top:0;left:0;width:100%;height:100%}\n' +
+		'.cardify-trailer__yt iframe{display:block;width:100%;height:100%;border:0;pointer-events:none}\n';
 
 	function addTemplates() {
 		Lampa.Template.add(
@@ -1245,6 +1833,12 @@
 
 		Lampa.SettingsApi.addComponent({ component: 'cardify', icon: SETTINGS_ICON, name: 'Cardify' });
 
+		addParam(
+			{ name: 'cardify_trailers_source', type: 'select', values: { rutube: 'RUTUBE', youtube: 'YouTube' }, default: 'rutube' },
+			'cardify_s_source',
+			'cardify_s_source_descr'
+		);
+
 		addParam({ name: 'cardify_trailers_bg', type: 'trigger', default: false }, 'cardify_s_trailer', 'cardify_s_trailer_descr');
 
 		var volumes = {};
@@ -1266,8 +1860,18 @@
 			{
 				name: 'cardify_trailers_zoom',
 				type: 'select',
-				values: { 0: off, 25: '+25%', 33: '+33%', 40: '+40%', 45: '+45%', 50: '+50%' },
-				default: '0'
+				// ключи не числовые, чтобы «Авто» шло первым (числовые ключи объект сортирует вперёд);
+				// старые значения '25', '33'… читаются так же
+				values: {
+					auto: t('cardify_s_zoom_auto'),
+					none: t('cardify_s_zoom_none'),
+					'+25': '+25%',
+					'+33': '+33%',
+					'+40': '+40%',
+					'+45': '+45%',
+					'+50': '+50%'
+				},
+				default: 'auto'
 			},
 			'cardify_s_zoom',
 			'cardify_s_zoom_descr'
@@ -1352,6 +1956,11 @@
 			if (e.name === 'cardify_trailers_volume') {
 				cards.forEach(function (c) {
 					c.updateVolume();
+				});
+			}
+			if (e.name === 'cardify_trailers_zoom' || e.name === 'cardify_trailers_blur') {
+				cards.forEach(function (c) {
+					c.updateLook();
 				});
 			}
 		});
