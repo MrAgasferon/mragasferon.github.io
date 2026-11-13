@@ -23,7 +23,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '2.7';
+	var VERSION = '2.8';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -37,7 +37,23 @@
 		'официальный', 'official', 'русский', 'на', 'русском', 'дублированный'
 	];
 
+	// Язык трейлеров RUTUBE: первый запрос с пометкой языка; в названии — бонус за свой язык,
+	// штраф за английский / оригинал / субтитры. Для других языков интерфейса — без этого шага
+	var LANG_RULES = {
+		ru: {
+			query: 'русский трейлер',
+			good: /русск|на русском|дубляж|дублир|\brus\b/,
+			bad: /англ|english|\beng\b|оригинал|original|субтитр|subtitle|\bsubs?\b/
+		},
+		uk: {
+			query: 'український трейлер',
+			good: /українськ|українською|\bukr\b|\bукр\b/,
+			bad: /англ|english|\beng\b|оригінал|original|субтитр|subtitle|\bsubs?\b/
+		}
+	};
+
 	var SCORE = {
+		LANG_MATCH: 150,
 		EXACT_MATCH: 300,
 		YEAR_MATCH: 100,
 		WRONG_YEAR: -1000,
@@ -139,6 +155,32 @@
 			.toLowerCase();
 	}
 
+	function langRule() {
+		return LANG_RULES[contentLang()] || null;
+	}
+
+	// +1 — явно на своём языке, -1 — явно английский/оригинал, 0 — непонятно
+	function langScore(title) {
+		var rule = langRule();
+		if (!rule) return 0;
+		var t = cleanString(title);
+		return (rule.good.test(t) ? 1 : 0) - (rule.bad.test(t) ? 1 : 0);
+	}
+
+	// Свой язык вперёд, английский назад; в остальном порядок сохраняется
+	function rankByLang(list) {
+		return list
+			.map(function (item, i) {
+				return { item: item, i: i, l: langScore(item.title) };
+			})
+			.sort(function (a, b) {
+				return b.l - a.l || a.i - b.i;
+			})
+			.map(function (x) {
+				return x.item;
+			});
+	}
+
 	function rutubeId(url) {
 		var m = String(url || '').match(RUTUBE_URL_RE);
 		return m ? m[1] : '';
@@ -221,7 +263,7 @@
 			var hit = cached[0] && cached[1] && cached[1].length;
 			log('trailer: из sessionStorage —', hit ? cached[1].length + ' шт.' : 'ранее не найден');
 			finished = true;
-			if (hit) onSuccess(cached[1]);
+			if (hit) onSuccess(rankByLang(cached[1]));
 			else onFail();
 			return abort;
 		}
@@ -268,6 +310,7 @@
 			});
 			score += matching.length * SCORE.WORD_MATCH - (titleWords.length - matching.length) * SCORE.EXTRA_WORD_PENALTY;
 			score += r.duration > 120 ? SCORE.DURATION_BONUS : SCORE.DURATION_PENALTY;
+			score += langScore(r.title) * SCORE.LANG_MATCH;
 
 			return score;
 		}
@@ -302,7 +345,8 @@
 				});
 		}
 
-		var trailerTypes = ['трейлер', 'trailer', 'тизер'];
+		var rule = langRule();
+		var trailerTypes = (rule ? [rule.query] : []).concat(['трейлер', 'trailer', 'тизер']);
 
 		function searchStep(index) {
 			if (finished) return;
@@ -345,8 +389,15 @@
 				Lampa.Utils.protocol() + ROOTU_CACHE_PATH + type + '/' + tmdbId + '.json',
 				function (list) {
 					log('trailer: кэш rootu —', list && list.length ? list.length + ' шт.' : 'пусто');
-					if (list && list.length) done(list);
-					else searchStep(0);
+					if (!list || !list.length) return searchStep(0);
+
+					// кэш общий для всех пользователей и язык не учитывает
+					var ranked = rankByLang(list);
+					if (langRule() && langScore(ranked[0].title) < 0) {
+						log('trailer: в кэше rootu только ролики с пометкой другого языка — ищу сам');
+						return searchStep(0);
+					}
+					done(ranked);
 				},
 				function (xhr) {
 					log('trailer: кэш rootu —', xhr && xhr.status === 404 ? 'нет записи' : 'недоступен, ' + errInfo(xhr));
@@ -504,6 +555,8 @@
 	var DETECT_LIT_MIN = 0.05;       // кадр с меньшей долей светлых пикселей не учитываем
 	var DETECT_SOLID = 0.25;         // «светлый» кадр — по нему видна граница картинки
 	var DARK_LUMA = 32;              // яркость (0–255), ниже которой пиксель считается чёрным
+	var DETECT_EDGE_SKIP = 0.12;     // доля кадра у краёв, где не считаем светлое (логотипы, «18+»)
+	var DETECT_CONTENT = 0.1;        // строка — картинка, если хоть в одном кадре светится > 10 % её середины
 
 	function trailerSource() {
 		return Lampa.Storage.field('cardify_trailers_source') === 'youtube' ? 'youtube' : 'rutube';
@@ -638,6 +691,12 @@
 				return 'empty';
 			}
 
+			// Строки меряем по середине ширины, столбцы — по середине высоты: логотип канала,
+			// «18+» и прочее в углах поверх полосы не делают её «картинкой»
+			var x0 = Math.round(w * DETECT_EDGE_SKIP);
+			var x1 = w - x0;
+			var y0 = Math.round(h * DETECT_EDGE_SKIP);
+			var y1 = h - y0;
 			var rows = [];
 			var cols = [];
 			var lit = 0;
@@ -649,42 +708,52 @@
 				for (x = 0; x < w; x++) {
 					var o = (y * w + x) * 4;
 					if (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2] > DARK_LUMA) {
-						n++;
-						cols[x]++;
+						lit++;
+						if (x >= x0 && x < x1) n++;
+						if (y >= y0 && y < y1) cols[x]++;
 					}
 				}
 				rows.push(n);
-				lit += n;
 			}
 
 			var share = lit / (w * h);
 			if (share < DETECT_LIT_MIN) return 'black';
 
-			for (y = 0; y < h; y++) rowMax[y] = Math.max(rowMax[y], rows[y] / w);
-			for (x = 0; x < w; x++) colMax[x] = Math.max(colMax[x], cols[x] / h);
+			for (y = 0; y < h; y++) rowMax[y] = Math.max(rowMax[y], rows[y] / (x1 - x0));
+			for (x = 0; x < w; x++) colMax[x] = Math.max(colMax[x], cols[x] / (y1 - y0));
 
 			meter.good++;
 			if (share >= DETECT_SOLID) meter.solid++; // светлый кадр: по нему видна граница картинки
 			return 'good';
 		};
 
-		// Полосы симметричные: субтитры или логотип в одной полосе не мешают, их срезает вместе с другой
+		// Тёмные края по каждой стороне отдельно (доли кадра) — для лога и расчёта
+		meter.raw = function () {
+			if (!meter.good) return { t: 0, b: 0, l: 0, r: 0 };
+
+			var t = 0;
+			while (t < h && rowMax[t] <= DETECT_CONTENT) t++;
+			var b = 0;
+			while (b < h - t && rowMax[h - 1 - b] <= DETECT_CONTENT) b++;
+			var l = 0;
+			while (l < w && colMax[l] <= DETECT_CONTENT) l++;
+			var r = 0;
+			while (r < w - l && colMax[w - 1 - r] <= DETECT_CONTENT) r++;
+
+			return { t: t / h, b: b / h, l: l / w, r: r / w };
+		};
+
+		// Полосы симметричные: субтитры в одной полосе не мешают, их срезает вместе с другой
 		meter.bars = function () {
 			if (!meter.good) return NO_BARS;
 
-			var t = 0;
-			while (t < h && rowMax[t] <= 0.02) t++;
-			var b = 0;
-			while (b < h - t && rowMax[h - 1 - b] <= 0.02) b++;
-			var l = 0;
-			while (l < w && colMax[l] <= 0.02) l++;
-			var r = 0;
-			while (r < w - l && colMax[w - 1 - r] <= 0.02) r++;
-
-			var v = Math.max(t, b) / h;
-			var hz = Math.max(l, r) / w;
+			var raw = meter.raw();
+			var v = Math.max(raw.t, raw.b);
+			var hz = Math.max(raw.l, raw.r);
 			v = v > 0 ? v + 1 / h : 0; // +1 строка анализа — без тонкой тёмной каймы
 			hz = hz > 0 ? hz + 1 / w : 0;
+			v = Math.round(v * 1000) / 1000;
+			hz = Math.round(hz * 1000) / 1000;
 			if (v < 0.015) v = 0;
 			if (hz < 0.015) hz = 0;
 			v = Math.min(v, 0.3);
@@ -696,8 +765,10 @@
 		return meter;
 	}
 
-	function barsText(bars) {
-		return 'полосы сверху/снизу ' + percent(bars.t) + ', по бокам ' + percent(bars.l);
+	function barsText(bars, raw) {
+		var text = 'полосы сверху/снизу ' + percent(bars.t) + ', по бокам ' + percent(bars.l);
+		if (raw) text += ' [края: верх ' + percent(raw.t) + ', низ ' + percent(raw.b) + ', лево ' + percent(raw.l) + ', право ' + percent(raw.r) + ']';
+		return text;
 	}
 
 	// Полосы по картинкам (превью ролика). done(bars | null, note)
@@ -712,7 +783,7 @@
 			finished = true;
 			clearTimeout(timer);
 			if (!meter.solid) return done(null, meter.good ? 'превью тёмные' : 'превью не загрузились или не читаются');
-			done(meter.bars(), 'по ' + meter.good + ' превью');
+			done(meter.bars(), 'по ' + meter.good + ' превью', meter.raw());
 		}
 
 		if (!meter.ok || !left) {
@@ -794,7 +865,7 @@
 				if (meter.solid < 2 && attempts < DETECT_PRE_ATTEMPTS) return;
 				decided = true;
 				applied = meter.solid ? meter.bars() : NO_BARS;
-				onDecide(applied, meter.solid ? note() : 'светлых кадров пока нет');
+				onDecide(applied, meter.solid ? note() : 'светлых кадров пока нет (' + attempts + ' проб, учтено ' + meter.good + ')', meter.raw(), meter.good);
 				attempts = 0;
 				clearInterval(timer);
 				timer = setInterval(tick, DETECT_POST_INTERVAL);
@@ -805,7 +876,7 @@
 				var next = meter.bars();
 				if (Math.abs(next.t - applied.t) >= 0.02 || Math.abs(next.l - applied.l) >= 0.02) {
 					applied = next;
-					onRefine(applied, note());
+					onRefine(applied, note(), meter.raw());
 				}
 			}
 			if (attempts >= DETECT_POST_ATTEMPTS || meter.solid >= 12) stop();
@@ -853,6 +924,7 @@
 		var soundBlocked = false; // браузер не дал включить звук — до смены настройки не пробуем
 		var bars = NO_BARS;
 		var cancelDetect = noop;
+		var cancelThumb = noop;
 
 		// Стартуем всегда без звука: беззвучный автозапуск разрешён везде, звук включаем при показе
 		video.muted = true;
@@ -873,16 +945,26 @@
 		function startFraming() {
 			if (!zoomSetting().auto) return reveal();
 
-			cancelDetect = watchVideoBars(
+			var cancelVideo = watchVideoBars(
 				video,
-				function (found, note) {
+				function (found, note, raw, good) {
 					bars = found;
-					log('trailer: кадр —', barsText(found), '(' + note + ')');
+					log('trailer: кадр (' + mode + ') —', barsText(found, raw), '(' + note + ')');
 					reveal();
+
+					// кадры есть, но все чёрные — возможно, видео рисуется мимо canvas; подсказка по превью
+					if (!good && thumbUrl) {
+						cancelThumb = barsFromImages([thumbUrl], function (thumbBars, n2, thumbRaw) {
+							if (dead || !thumbBars || bars !== NO_BARS) return;
+							bars = thumbBars;
+							log('trailer: кадр по превью —', barsText(thumbBars, thumbRaw), '(' + n2 + ')');
+							layout(true);
+						});
+					}
 				},
-				function (found, note) {
+				function (found, note, raw) {
 					bars = found;
-					log('trailer: кадр уточнён —', barsText(found), '(' + note + ')');
+					log('trailer: кадр уточнён —', barsText(found, raw), '(' + note + ')');
 					if (revealed) layout(true);
 				},
 				function (note) {
@@ -891,14 +973,19 @@
 						log('trailer: кадр —', note + ', без обрезки');
 						return reveal();
 					}
-					log('trailer: кадр —', note + ', ищу полосы по превью');
-					cancelDetect = barsFromImages([thumbUrl], function (found, n2) {
+					log('trailer: кадр (' + mode + ') —', note + ', ищу полосы по превью');
+					cancelThumb = barsFromImages([thumbUrl], function (found, n2, raw) {
 						if (found) bars = found;
-						log('trailer: кадр по превью —', barsText(bars), '(' + n2 + ')');
+						log('trailer: кадр по превью —', barsText(bars, raw), '(' + n2 + ')');
 						reveal();
 					});
 				}
 			);
+
+			cancelDetect = function () {
+				cancelVideo();
+				cancelThumb();
+			};
 		}
 
 		function onResize() {
@@ -1326,11 +1413,11 @@
 				['mq1', 'mq2', 'mq3'].map(function (n) {
 					return 'https://i.ytimg.com/vi/' + videoId + '/' + n + '.jpg';
 				}),
-				function (found, note) {
+				function (found, note, raw) {
 					if (dead) return;
 					if (found) bars = found;
 					framed = true;
-					log('trailer: кадр YouTube —', barsText(bars), '(' + note + ')');
+					log('trailer: кадр YouTube —', barsText(bars, raw), '(' + note + ')');
 					layout();
 					maybeReveal();
 				}
