@@ -23,7 +23,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '2.8';
+	var VERSION = '2.9';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -815,8 +815,9 @@
 		};
 	}
 
-	// Полосы по кадрам видео: решение до показа (≤ 4 с), потом уточнение в фоне (≤ 30 с).
-	// onDecide(bars, note) — один раз; onRefine(bars, note) — если граница заметно сдвинулась;
+	// Полосы по кадрам видео: решение до показа (≤ 4 с) и больше не меняется. Если в начале были
+	// только тёмные кадры — одно уточнение в фоне (≤ 30 с), как только появятся светлые.
+	// onDecide(bars, note) — один раз; onRefine(bars, note) — то самое уточнение;
 	// onUnreadable(note) — кадр не читается (видео с чужого домена без CORS)
 	function watchVideoBars(video, onDecide, onRefine, onUnreadable) {
 		var meter = createBarsMeter();
@@ -864,22 +865,27 @@
 			if (!decided) {
 				if (meter.solid < 2 && attempts < DETECT_PRE_ATTEMPTS) return;
 				decided = true;
-				applied = meter.solid ? meter.bars() : NO_BARS;
-				onDecide(applied, meter.solid ? note() : 'светлых кадров пока нет (' + attempts + ' проб, учтено ' + meter.good + ')', meter.raw(), meter.good);
+				var sure = meter.solid >= 2;
+				applied = sure ? meter.bars() : NO_BARS;
+				onDecide(applied, sure ? note() : 'светлых кадров пока нет (' + attempts + ' проб, учтено ' + meter.good + ')', meter.raw(), meter.good);
+
+				// Уверенное решение окончательное: надписи «подпишись» и т.п., которые
+				// позже появляются в полосах, кадр уже не двигают
+				if (sure) return stop();
+
 				attempts = 0;
 				clearInterval(timer);
 				timer = setInterval(tick, DETECT_POST_INTERVAL);
 				return;
 			}
 
+			// После тёмного начала — одно уточнение, как только наберутся светлые кадры
 			if (meter.solid >= 2) {
-				var next = meter.bars();
-				if (Math.abs(next.t - applied.t) >= 0.02 || Math.abs(next.l - applied.l) >= 0.02) {
-					applied = next;
-					onRefine(applied, note(), meter.raw());
-				}
+				applied = meter.bars();
+				if (applied.t > 0 || applied.l > 0) onRefine(applied, note(), meter.raw());
+				return stop();
 			}
-			if (attempts >= DETECT_POST_ATTEMPTS || meter.solid >= 12) stop();
+			if (attempts >= DETECT_POST_ATTEMPTS) stop();
 		}
 
 		timer = setInterval(tick, DETECT_PRE_INTERVAL);
@@ -899,9 +905,12 @@
 		return !!Hls && typeof Hls.isSupported === 'function' && Hls.isSupported();
 	}
 
-	function preferHlsJs(nativeHls) {
+	// forFrames — нужен доступ к кадрам («Авто»): у встроенного HLS кадр видео с чужого домена
+	// не читается (SecurityError), у hls.js (MSE) — читается
+	function preferHlsJs(nativeHls, forFrames) {
 		if (!hlsJsAvailable()) return false;
 		if (Lampa.Platform.is('tizen') || Lampa.Platform.is('orsay')) return false;
+		if (forFrames) return true;
 
 		var chrome = typeof Lampa.Platform.chromeVersion === 'function' ? Lampa.Platform.chromeVersion() : 0;
 		return Lampa.Storage.field('player_hls_method') === 'hlsjs' || chrome > 120 || !nativeHls;
@@ -1182,7 +1191,12 @@
 			fail('media error ' + (err ? err.code + (err.message ? ' ' + err.message : '') : ''));
 		});
 
-		attach(preferHlsJs(nativeHls) ? 'hls.js' : 'native');
+		var forFrames = zoomSetting().auto;
+		var firstMode = preferHlsJs(nativeHls, forFrames) ? 'hls.js' : 'native';
+		if (forFrames && firstMode === 'hls.js' && !preferHlsJs(nativeHls, false)) {
+			log('trailer: «Авто» — беру hls.js вместо встроенного HLS, чтобы читать кадры');
+		}
+		attach(firstMode);
 
 		return {
 			render: function () {
