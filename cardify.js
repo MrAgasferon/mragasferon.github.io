@@ -19,7 +19,7 @@
 	// Константы
 	// ---------------------------------------------------------------------------
 
-	var VERSION = '2.2';
+	var VERSION = '2.3';
 	var MAX_TRAILER_HEIGHT = 1080;      // потолок качества фонового трейлера (высота кадра)
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
@@ -486,6 +486,12 @@
 		return 1 + (parseInt(value, 10) || 0) / 100;
 	}
 
+	// 0…1 из настройки «Громкость фонового трейлера» (0–100 % с шагом 5)
+	function trailerVolume() {
+		var v = parseInt(Lampa.Storage.field('cardify_trailers_volume'), 10) || 0;
+		return Math.max(0, Math.min(100, v)) / 100;
+	}
+
 	function applyVideoLook(el) {
 		var blur = parseInt(Lampa.Storage.field('cardify_trailers_blur'), 10) || 0;
 		var scale = zoomScale(Lampa.Storage.field('cardify_trailers_zoom'));
@@ -524,10 +530,40 @@
 		var started = false;
 		var dead = false;
 		var startTimer = null;
+		var wantPlaying = false;  // паузу ставили мы (плеер, другая карточка) или браузер
+		var soundBlocked = false; // браузер не дал включить звук — до смены настройки не пробуем
 
+		// Стартуем всегда без звука: беззвучный автозапуск разрешён везде, звук включаем после старта
 		video.muted = true;
 		video.loop = true;
 		applyVideoLook(video);
+
+		function applyVolume() {
+			if (dead) return;
+			var volume = trailerVolume();
+
+			if (volume <= 0) {
+				video.muted = true;
+				return;
+			}
+
+			try {
+				video.volume = volume; // доля от текущей громкости устройства
+			} catch (e) {}
+
+			if (!started || soundBlocked || !video.muted) return;
+
+			video.muted = false;
+
+			// Без жеста пользователя браузер при включении звука ставит видео на паузу
+			setTimeout(function () {
+				if (dead || !wantPlaying || !video.paused) return;
+				soundBlocked = true;
+				log('trailer: браузер не разрешил звук — играю без звука');
+				video.muted = true;
+				play();
+			}, 300);
+		}
 
 		var nativeHls = !!(video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl'));
 		var mode = '';
@@ -592,6 +628,7 @@
 
 		function play() {
 			if (dead) return;
+			wantPlaying = true;
 			if (!started && !startTimer) {
 				startTimer = setTimeout(function () {
 					fail('не стартовало за ' + TRAILER_START_TIMEOUT / 1000 + ' с');
@@ -610,6 +647,7 @@
 
 		function pause() {
 			if (dead) return;
+			wantPlaying = false;
 			if (!started) {
 				clearTimeout(startTimer);
 				startTimer = null;
@@ -642,9 +680,10 @@
 			startTimer = null;
 			if (started || dead) return;
 			started = true;
-			log('trailer: играет (' + mode + ')', video.videoWidth + 'x' + video.videoHeight);
+			log('trailer: играет (' + mode + ')', video.videoWidth + 'x' + video.videoHeight, '| громкость', Math.round(trailerVolume() * 100) + '%');
 			html.addClass('display');
 			handlers.onStart();
+			applyVolume();
 		});
 
 		// страховка на случай, если loop не сработал (hls.js на старых WebView)
@@ -669,7 +708,12 @@
 			},
 			play: play,
 			pause: pause,
-			destroy: destroy
+			destroy: destroy,
+			// смена настройки — действие пользователя, звук можно пробовать снова
+			updateVolume: function () {
+				soundBlocked = false;
+				applyVolume();
+			}
 		};
 	}
 
@@ -1079,7 +1123,14 @@
 			if (i >= 0) cards.splice(i, 1);
 		}
 
-		var card = { activity: activity, sync: sync, destroy: destroy };
+		var card = {
+			activity: activity,
+			sync: sync,
+			destroy: destroy,
+			updateVolume: function () {
+				if (trailer) trailer.updateVolume();
+			}
+		};
 
 		log('карточка:', movie ? movie.title || movie.name : '(нет данных)', '| трейлер:', isOn('cardify_trailers_bg'), '| слайдшоу:', isOn('cardify_run_slideshow'));
 
@@ -1098,10 +1149,17 @@
 			cardify_trailers: { ru: 'Трейлеры', uk: 'Трейлери', en: 'Trailers' },
 			cardify_s_trailer: { ru: 'Фоновый трейлер (RUTUBE)', uk: 'Фоновий трейлер (RUTUBE)', en: 'Background trailer (RUTUBE)' },
 			cardify_s_trailer_descr: {
-				ru: 'Беззвучно проигрывать трейлер с RUTUBE на фоне вместо картинок',
-				uk: 'Беззвучно відтворювати трейлер з RUTUBE на фоні замість зображень',
-				en: 'Play a muted RUTUBE trailer in the background instead of images'
+				ru: 'Проигрывать трейлер с RUTUBE на фоне вместо картинок',
+				uk: 'Відтворювати трейлер з RUTUBE на фоні замість зображень',
+				en: 'Play a RUTUBE trailer in the background instead of images'
 			},
+			cardify_s_volume: { ru: 'Громкость фонового трейлера', uk: 'Гучність фонового трейлера', en: 'Background trailer volume' },
+			cardify_s_volume_descr: {
+				ru: 'Доля от текущей громкости устройства. 0% — без звука',
+				uk: 'Частка від поточної гучності пристрою. 0% — без звуку',
+				en: 'Share of the current device volume. 0% means muted'
+			},
+			cardify_s_muted: { ru: 'без звука', uk: 'без звуку', en: 'muted' },
 			cardify_s_blur: { ru: 'Размытие фонового видео', uk: 'Розмиття фонового відео', en: 'Background video blur' },
 			cardify_s_blur_descr: { ru: 'Эффект размытия (blur) для фонового трейлера', uk: 'Ефект розмиття (blur) для фонового трейлера', en: 'Blur effect for the background trailer' },
 			cardify_s_zoom: { ru: 'Масштаб видео', uk: 'Масштабування відео', en: 'Video zoom' },
@@ -1188,6 +1246,10 @@
 		Lampa.SettingsApi.addComponent({ component: 'cardify', icon: SETTINGS_ICON, name: 'Cardify' });
 
 		addParam({ name: 'cardify_trailers_bg', type: 'trigger', default: false }, 'cardify_s_trailer', 'cardify_s_trailer_descr');
+
+		var volumes = {};
+		for (var v = 0; v <= 100; v += 5) volumes[v] = v === 0 ? '0% (' + t('cardify_s_muted') + ')' : v + '%';
+		addParam({ name: 'cardify_trailers_volume', type: 'select', values: volumes, default: '0' }, 'cardify_s_volume', 'cardify_s_volume_descr');
 
 		addParam(
 			{
@@ -1287,6 +1349,11 @@
 
 		Lampa.Storage.listener.follow('change', function (e) {
 			if (/^cardify_(show_status|show_pg|show_rating|ratings_position)$/.test(e.name)) updateVisibility();
+			if (e.name === 'cardify_trailers_volume') {
+				cards.forEach(function (c) {
+					c.updateVolume();
+				});
+			}
 		});
 
 		Lampa.Listener.follow('full', function (e) {
