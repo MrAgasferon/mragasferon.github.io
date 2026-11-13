@@ -8,6 +8,7 @@
  *    (ролики из данных TMDB, IFrame API);
  *  - «Авто» в масштабе: кадр под экран, вшитые чёрные полосы находятся и обрезаются
  *    (RUTUBE — по кадрам превью через wsrv.nl, запасной путь — кадры видео; YouTube — по автокадрам-превью);
+ *    масштаб задаётся отдельно для RUTUBE и YouTube;
  *  - трейлер и слайдшоу ставятся на паузу, пока открыт плеер или активна другая карточка;
  *  - интерфейс через Lampa.Lang (ru / uk / en).
  * Ключи настроек прежние (cardify_*), старые значения подхватятся.
@@ -23,7 +24,7 @@
 	// ---------------------------------------------------------------------------
 
 	var PLUGIN_NAME = 'Cardify+';
-	var VERSION = '3.1';
+	var VERSION = '3.3';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 4;     // сколько найденных роликов пробовать по очереди (с проверкой на мыло)
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -641,9 +642,9 @@
 		return Math.max(0, Math.min(100, v)) / 100;
 	}
 
-	// «Масштаб видео»: auto — под экран с обрезкой вшитых полос; none/+N — ручной режим
-	function zoomSetting() {
-		var v = Lampa.Storage.field('cardify_trailers_zoom');
+	// «Масштаб RUTUBE» / «Масштаб YouTube»: auto — под экран с обрезкой вшитых полос; none/+N — ручной
+	function zoomSetting(source) {
+		var v = Lampa.Storage.field(source === 'youtube' ? 'cardify_trailers_zoom_youtube' : 'cardify_trailers_zoom_rutube');
 		if (v === true) v = '33'; // старый формат настройки (trigger)
 		if (v === false) v = '0';
 		if (v === undefined || v === null || v === '' || v === 'auto') return { auto: true, scale: 1 };
@@ -864,6 +865,8 @@
 		return text;
 	}
 
+	var previewUnreachable = false; // wsrv.nl не ответил вовсе — до перезапуска превью не запрашиваем
+
 	// Полосы по превью RUTUBE (preview.rutube.ru, анимированный WebP — кадры со всего ролика).
 	// Сам RUTUBE отдаёт превью без CORS, поэтому берём его через wsrv.nl: тот отдаёт с CORS,
 	// уменьшает до ширины анализа и с n=-1 складывает все кадры в одну полосу сверху вниз.
@@ -875,6 +878,7 @@
 		var first = null;
 		var strip = null;
 		var left = 2;
+		var answered = false; // пришёл хоть какой-то ответ (картинка или ошибка)
 		var finished = false;
 		var timer = null;
 
@@ -906,11 +910,13 @@
 			var img = new Image();
 			img.crossOrigin = 'anonymous';
 			img.onload = function () {
+				answered = true;
 				if (finished) return;
 				put(img);
 				if (--left <= 0) finish();
 			};
 			img.onerror = function () {
+				answered = true;
 				if (--left <= 0) finish();
 			};
 			img.src = url;
@@ -922,6 +928,11 @@
 		}
 
 		timer = setTimeout(function () {
+			// ни картинки, ни ошибки — сервис недоступен (например, заблокирован у провайдера)
+			if (!answered) {
+				previewUnreachable = true;
+				log('trailer: wsrv.nl не отвечает — до перезапуска превью не запрашиваю');
+			}
 			finish('превью не ответило за ' + PREVIEW_TIMEOUT / 1000 + ' с');
 		}, PREVIEW_TIMEOUT);
 
@@ -1109,7 +1120,7 @@
 		// animate — плавно, когда граница уточнилась уже после показа
 		function layout(animate) {
 			var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : knownAspect || 16 / 9;
-			var zoom = zoomSetting();
+			var zoom = zoomSetting('rutube');
 			var transition = animate ? 'left .8s ease, top .8s ease, width .8s ease, height .8s ease' : '';
 			video.style.webkitTransition = transition;
 			video.style.transition = transition;
@@ -1119,7 +1130,7 @@
 
 		// Превью грузится сразу, параллельно с видео: к старту видео кадр обычно уже готов
 		function loadPreview() {
-			if (!zoomSetting().auto || !videoId) return;
+			if (!zoomSetting('rutube').auto || !videoId || previewUnreachable) return;
 			preview.state = 'loading';
 			cancelPreview = barsFromRutubePreview(videoId, function (found, note, raw) {
 				if (dead) return;
@@ -1135,7 +1146,7 @@
 		}
 
 		function startFraming() {
-			if (!zoomSetting().auto) return reveal();
+			if (!zoomSetting('rutube').auto) return reveal();
 
 			if (preview.state === 'done') return framingAfterPreview();
 			if (preview.state === 'loading') {
@@ -1159,7 +1170,7 @@
 			watchFrames();
 		}
 
-		// Запасной путь: кадры самого видео (читаются не везде — см. лог)
+		// Запасной путь: кадры самого видео (читаются не на всех устройствах — см. лог)
 		function watchFrames() {
 			if (revealed || dead) return;
 			cancelDetect = watchVideoBars(
@@ -1493,7 +1504,7 @@
 
 		var boxScale = 1;
 		var bars = NO_BARS;
-		var framed = !zoomSetting().auto; // в ручном масштабе полосы не ищем
+		var framed = !zoomSetting('youtube').auto; // в ручном масштабе полосы не ищем
 		var playReady = false;
 		var cancelThumbs = noop;
 
@@ -1502,7 +1513,7 @@
 		// Качество YouTube выбирает по размеру плеера в пикселях устройства, поэтому iframe
 		// верстается под выбранное качество (1280/1920/2560 px по ширине) и масштабируется transform'ом
 		function layout() {
-			var zoom = zoomSetting();
+			var zoom = zoomSetting('youtube');
 			var r = coverRect(16 / 9, zoom.auto ? bars : NO_BARS, zoom.auto ? 1 : zoom.scale);
 			var dpr = window.devicePixelRatio || 1;
 			var w = (trailerQuality() * 16) / 9 / dpr;
@@ -2251,11 +2262,17 @@
 			cardify_s_muted: { ru: 'без звука', uk: 'без звуку', en: 'muted' },
 			cardify_s_blur: { ru: 'Размытие фонового видео', uk: 'Розмиття фонового відео', en: 'Background video blur' },
 			cardify_s_blur_descr: { ru: 'Эффект размытия (blur) для фонового трейлера', uk: 'Ефект розмиття (blur) для фонового трейлера', en: 'Blur effect for the background trailer' },
-			cardify_s_zoom: { ru: 'Масштаб видео', uk: 'Масштабування відео', en: 'Video zoom' },
-			cardify_s_zoom_descr: {
-				ru: 'Авто — видео на весь экран, вшитые чёрные полосы обрезаются',
-				uk: 'Авто — відео на весь екран, вшиті чорні смуги обрізаються',
-				en: 'Auto: fill the screen and crop burned-in black bars'
+			cardify_s_zoom_rutube: { ru: 'Масштаб RUTUBE', uk: 'Масштаб RUTUBE', en: 'RUTUBE zoom' },
+			cardify_s_zoom_rutube_descr: {
+				ru: 'Авто — на весь экран с обрезкой вшитых полос (по превью ролика через wsrv.nl; если сервис недоступен — просто на весь экран)',
+				uk: 'Авто — на весь екран з обрізанням вшитих смуг (за превʼю ролика через wsrv.nl; якщо сервіс недоступний — просто на весь екран)',
+				en: 'Auto: fill the screen and crop burned-in bars (from the video preview via wsrv.nl; if unavailable, just fill)'
+			},
+			cardify_s_zoom_youtube: { ru: 'Масштаб YouTube', uk: 'Масштаб YouTube', en: 'YouTube zoom' },
+			cardify_s_zoom_youtube_descr: {
+				ru: 'Авто — на весь экран с обрезкой вшитых полос по превью YouTube',
+				uk: 'Авто — на весь екран з обрізанням вшитих смуг за превʼю YouTube',
+				en: 'Auto: fill the screen and crop burned-in bars using YouTube thumbnails'
 			},
 			cardify_s_zoom_auto: { ru: 'Авто — под экран', uk: 'Авто — під екран', en: 'Auto: fit screen' },
 			cardify_s_zoom_none: { ru: 'Без увеличения', uk: 'Без збільшення', en: 'No zoom' },
@@ -2378,25 +2395,33 @@
 			'cardify_s_blur_descr'
 		);
 
+		// Масштаб — отдельно для RUTUBE и YouTube. Ключи не числовые, чтобы «Авто» шло первым
+		// (числовые ключи объект сортирует вперёд). Стартовое значение — прежняя общая настройка
+		var zoomValues = {
+			auto: t('cardify_s_zoom_auto'),
+			none: t('cardify_s_zoom_none'),
+			'+25': '+25%',
+			'+33': '+33%',
+			'+40': '+40%',
+			'+45': '+45%',
+			'+50': '+50%'
+		};
+		var legacyZoom = Lampa.Storage.get('cardify_trailers_zoom', 'auto');
+		if (legacyZoom === true) legacyZoom = '+33';
+		if (legacyZoom === false) legacyZoom = 'none';
+		legacyZoom = String(legacyZoom);
+		if (/^\d+$/.test(legacyZoom)) legacyZoom = legacyZoom === '0' ? 'none' : '+' + legacyZoom;
+		if (!zoomValues[legacyZoom]) legacyZoom = 'auto';
+
 		addParam(
-			{
-				name: 'cardify_trailers_zoom',
-				type: 'select',
-				// ключи не числовые, чтобы «Авто» шло первым (числовые ключи объект сортирует вперёд);
-				// старые значения '25', '33'… читаются так же
-				values: {
-					auto: t('cardify_s_zoom_auto'),
-					none: t('cardify_s_zoom_none'),
-					'+25': '+25%',
-					'+33': '+33%',
-					'+40': '+40%',
-					'+45': '+45%',
-					'+50': '+50%'
-				},
-				default: 'auto'
-			},
-			'cardify_s_zoom',
-			'cardify_s_zoom_descr'
+			{ name: 'cardify_trailers_zoom_rutube', type: 'select', values: zoomValues, default: legacyZoom },
+			'cardify_s_zoom_rutube',
+			'cardify_s_zoom_rutube_descr'
+		);
+		addParam(
+			{ name: 'cardify_trailers_zoom_youtube', type: 'select', values: zoomValues, default: legacyZoom },
+			'cardify_s_zoom_youtube',
+			'cardify_s_zoom_youtube_descr'
 		);
 
 		addParam({ name: 'cardify_run_slideshow', type: 'trigger', default: true }, 'cardify_s_slideshow', 'cardify_s_slideshow_descr');
@@ -2480,7 +2505,7 @@
 					c.updateVolume();
 				});
 			}
-			if (e.name === 'cardify_trailers_zoom' || e.name === 'cardify_trailers_blur') {
+			if (/^cardify_trailers_(zoom_rutube|zoom_youtube|blur)$/.test(e.name)) {
 				cards.forEach(function (c) {
 					c.updateLook();
 				});
