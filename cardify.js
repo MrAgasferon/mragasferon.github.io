@@ -21,8 +21,7 @@
 	// Константы
 	// ---------------------------------------------------------------------------
 
-	var VERSION = '2.4';
-	var MAX_TRAILER_HEIGHT = 1080;      // потолок качества фонового трейлера (высота кадра)
+	var VERSION = '2.5';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -360,13 +359,36 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Поток RUTUBE: play/options → master m3u8 → вариант не выше MAX_TRAILER_HEIGHT
+	// Поток RUTUBE: play/options → master m3u8 → вариант не выше настройки качества
 	// ---------------------------------------------------------------------------
 
+	// Индекс варианта: самый высокий не выше target; если все выше — самый лёгкий
+	function chooseLevel(levels, target) {
+		var best = -1;
+		var lightest = 0;
+		for (var i = 0; i < levels.length; i++) {
+			var h = levels[i].height || 0;
+			if (h > 0 && h <= target && (best < 0 || h > levels[best].height || (h === levels[best].height && (levels[i].bandwidth || 0) > (levels[best].bandwidth || 0)))) best = i;
+			if ((h || levels[i].bandwidth || 0) < (levels[lightest].height || levels[lightest].bandwidth || 0)) lightest = i;
+		}
+		return best >= 0 ? best : lightest;
+	}
+
+	function heightsOf(levels) {
+		return levels
+			.map(function (l) {
+				return l.height || '?';
+			})
+			.join('/');
+	}
+
+	// Master m3u8 читается запросом Lampa: на Android он нативный и не упирается в CORS.
+	// Если прочитать не вышло — отдаём master, качество тогда выберет плеер (hls.js — по настройке)
 	function pickVariant(masterUrl, callback) {
-		var xhr = new XMLHttpRequest();
+		var net = new Lampa.Reguest();
 		var origin = (masterUrl.match(/^https?:\/\/[^\/]+/i) || [''])[0];
 		var base = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
+		var target = trailerQuality();
 		var called = false;
 
 		function finish(url, note) {
@@ -376,64 +398,56 @@
 			callback(url);
 		}
 
-		xhr.open('GET', masterUrl, true);
-		xhr.timeout = 10000;
-		xhr.onload = function () {
-			if (xhr.status !== 200) return finish(masterUrl, '(master, плейлист вернул ' + xhr.status + ')');
+		net.timeout(10000);
+		net.native(
+			masterUrl,
+			function (text) {
+				var lines = String(text || '').split('\n');
+				var streams = [];
 
-			var lines = String(xhr.responseText || '').split('\n');
-			var streams = [];
+				for (var i = 0; i < lines.length; i++) {
+					var line = lines[i].trim();
+					if (line.indexOf('#EXT-X-STREAM-INF:') !== 0) continue;
 
-			for (var i = 0; i < lines.length; i++) {
-				var line = lines[i].trim();
-				if (line.indexOf('#EXT-X-STREAM-INF:') !== 0) continue;
+					var next = (lines[i + 1] || '').trim();
+					if (!next || next.charAt(0) === '#') continue;
 
-				var next = (lines[i + 1] || '').trim();
-				if (!next || next.charAt(0) === '#') continue;
+					var res = line.match(/RESOLUTION=(\d+)x(\d+)/);
+					var bw = line.match(/BANDWIDTH=(\d+)/);
+					var url = /^https?:\/\//i.test(next) ? next : next.charAt(0) === '/' ? origin + next : base + next;
 
-				var res = line.match(/RESOLUTION=(\d+)x(\d+)/);
-				var bw = line.match(/BANDWIDTH=(\d+)/);
-				var url = /^https?:\/\//i.test(next) ? next : next.charAt(0) === '/' ? origin + next : base + next;
+					streams.push({
+						height: res ? parseInt(res[2], 10) : 0,
+						bandwidth: bw ? parseInt(bw[1], 10) : 0,
+						url: url
+					});
+				}
 
-				streams.push({
-					height: res ? parseInt(res[2], 10) : 0,
-					bandwidth: bw ? parseInt(bw[1], 10) : 0,
-					url: url
-				});
+				if (!streams.length) return finish(masterUrl, '(master, вариантов нет)');
+
+				var chosen = streams[chooseLevel(streams, target)];
+				finish(chosen.url, (chosen.height || '?') + 'p из ' + heightsOf(streams) + ', предел ' + target + 'p');
+			},
+			function (xhr) {
+				finish(masterUrl, '(master, плейлист не прочитан — ' + errInfo(xhr) + ')');
+			},
+			false,
+			{ dataType: 'text' }
+		);
+
+		return {
+			abort: function () {
+				called = true;
+				try {
+					net.clear();
+				} catch (e) {}
 			}
-
-			if (!streams.length) return finish(masterUrl, '(master, вариантов нет)');
-
-			var fit = streams
-				.filter(function (s) {
-					return s.height > 0 && s.height <= MAX_TRAILER_HEIGHT;
-				})
-				.sort(function (a, b) {
-					return b.height - a.height || b.bandwidth - a.bandwidth;
-				});
-
-			if (fit.length) return finish(fit[0].url, fit[0].height + 'p');
-
-			// всё выше потолка или без RESOLUTION — берём самый лёгкий
-			streams.sort(function (a, b) {
-				return (a.height || a.bandwidth) - (b.height || b.bandwidth);
-			});
-			finish(streams[0].url, (streams[0].height || '?') + 'p');
 		};
-		xhr.onerror = function () {
-			finish(masterUrl, '(master, плейлист не прочитан — CORS/сеть)');
-		};
-		xhr.ontimeout = function () {
-			finish(masterUrl, '(master, таймаут плейлиста)');
-		};
-		xhr.send();
-
-		return xhr;
 	}
 
 	function resolveStream(videoId, onSuccess, onFail) {
 		var net = new Lampa.Reguest();
-		var xhr = null;
+		var variant = null;
 		var aborted = false;
 		var url = 'https://rutube.ru/api/play/options/' + videoId + '/?format=json&no_404=true';
 
@@ -448,7 +462,7 @@
 						log('trailer: play/options', videoId, '— нет m3u8', json && json.detail ? json.detail : '');
 						return onFail();
 					}
-					xhr = pickVariant(master, function (streamUrl) {
+					variant = pickVariant(master, function (streamUrl) {
 						if (!aborted) onSuccess(streamUrl);
 					});
 				},
@@ -471,11 +485,7 @@
 			try {
 				net.clear();
 			} catch (e) {}
-			if (xhr) {
-				try {
-					xhr.abort();
-				} catch (e) {}
-			}
+			if (variant) variant.abort();
 		};
 	}
 
@@ -494,6 +504,12 @@
 		return Lampa.Storage.field('cardify_trailers_source') === 'youtube' ? 'youtube' : 'rutube';
 	}
 
+	// Предел качества трейлера по высоте кадра: 720 / 1080 / 1440
+	function trailerQuality() {
+		var q = parseInt(Lampa.Storage.field('cardify_trailers_quality'), 10);
+		return q === 1080 || q === 1440 ? q : 720;
+	}
+
 	// 0…1 из настройки «Громкость фонового трейлера» (0–100 % с шагом 5)
 	function trailerVolume() {
 		var v = parseInt(Lampa.Storage.field('cardify_trailers_volume'), 10) || 0;
@@ -509,9 +525,10 @@
 		return { auto: false, scale: 1 + (parseInt(v, 10) || 0) / 100 };
 	}
 
-	function applyBlur(el) {
-		var blur = parseInt(Lampa.Storage.field('cardify_trailers_blur'), 10) || 0;
-		var filter = blur > 0 ? 'blur(' + blur + 'px)' : '';
+	// scale — во сколько раз элемент потом растянут transform'ом: размытие делим, чтобы оно не росло
+	function applyBlur(el, scale) {
+		var blur = (parseInt(Lampa.Storage.field('cardify_trailers_blur'), 10) || 0) / (scale || 1);
+		var filter = blur > 0 ? 'blur(' + Math.round(blur * 10) / 10 + 'px)' : '';
 		el.style.webkitFilter = filter;
 		el.style.filter = filter;
 	}
@@ -835,9 +852,18 @@
 
 			if (how === 'hls.js') {
 				var Hls = window.Hls;
-				hls = new Hls({ maxBufferLength: 20, capLevelToPlayerSize: true });
+				// без привязки к размеру элемента: на ТВ с маленьким CSS-вьюпортом он резал качество
+				hls = new Hls({ maxBufferLength: 20, capLevelToPlayerSize: false });
 				hls.on(Hls.Events.ERROR, function (event, data) {
 					if (data && data.fatal) fail('hls.js: ' + data.type + ' / ' + data.details);
+				});
+				// пришёл master (плейлист не прочитался заранее) — уровень по настройке, без старта с низшего
+				hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+					var levels = (data && data.levels) || hls.levels || [];
+					if (levels.length < 2) return;
+					var idx = chooseLevel(levels, trailerQuality());
+					hls.currentLevel = idx;
+					log('trailer: hls.js уровень', (levels[idx].height || '?') + 'p из ' + heightsOf(levels));
 				});
 				hls.loadSource(url);
 				hls.attachMedia(video);
@@ -1004,8 +1030,9 @@
 		}, 100);
 	}
 
-	// Порядок: «official trailer» → тип Trailer → «трейлер» в названии → Teaser → прочее;
-	// внутри — язык контента, затем английский; свежие раньше
+	// Порядок: трейлеры и тизеры — язык контента → английский → прочие, внутри языка
+	// «official trailer» → тип Trailer → «трейлер» в названии → Teaser; затем остальные ролики; свежие раньше.
+	// Lampa кладёт в карточку ролики TMDB на языке контента и на английском вместе
 	function youtubeCandidates(e) {
 		var d = e.data || {};
 		var vids = d.videos || (d.movie && d.movie.videos) || (d.tv && d.tv.videos);
@@ -1035,7 +1062,8 @@
 				};
 			})
 			.sort(function (a, b) {
-				return a.rank - b.rank || a.lang - b.lang || b.time - a.time;
+				// язык важнее типа, но ролики «за кадром» и клипы — после всех трейлеров и тизеров
+				return (a.rank > 3) - (b.rank > 3) || a.lang - b.lang || a.rank - b.rank || b.time - a.time;
 			})
 			.slice(0, MAX_TRAILER_CANDIDATES);
 	}
@@ -1055,12 +1083,25 @@
 		var revealTimer = null;
 		var soundTimer = null;
 
+		var boxScale = 1;
+
 		// Кадр внутри iframe не прочитать, а ролики YouTube почти всегда 16:9 — подгоняем 16:9 под экран.
-		// iframe вдвое выше картинки: заголовок и логотип YouTube у краёв уходят за экран
+		// iframe вдвое выше картинки: заголовок и логотип YouTube у краёв уходят за экран.
+		// Качество YouTube выбирает по размеру плеера в пикселях устройства, поэтому iframe
+		// верстается под выбранное качество (1280/1920/2560 px по ширине) и масштабируется transform'ом
 		function layout() {
 			var zoom = zoomSetting();
 			var r = coverRect(16 / 9, NO_BARS, zoom.auto ? 1 : zoom.scale);
-			placeElement(box, { width: r.width, height: r.height * 2, left: r.left, top: r.top - r.height / 2 });
+			var dpr = window.devicePixelRatio || 1;
+			var w = (trailerQuality() * 16) / 9 / dpr;
+
+			boxScale = r.width / w;
+			placeElement(box, { width: w, height: ((w * 9) / 16) * 2, left: r.left, top: r.top - r.height / 2 });
+			box.style.webkitTransformOrigin = '0 0';
+			box.style.transformOrigin = '0 0';
+			box.style.webkitTransform = 'scale(' + boxScale + ')';
+			box.style.transform = 'scale(' + boxScale + ')';
+			applyBlur(box, boxScale);
 		}
 
 		function onResize() {
@@ -1145,13 +1186,17 @@
 			applyVolume();
 		}
 
-		// за 1.5 с до конца — в начало: экран «другие видео» YouTube не показываем
+		// Конец ролика не показываем: там конечная заставка автора (последние 5–20 с) и плитка
+		// «другие видео». Хвост — 12 % длины, не меньше 3 и не больше 20 с; запас и на медленные
+		// приставки, где время из iframe приходит с задержкой
 		function watchEnd() {
 			clearInterval(endTimer);
 			endTimer = setInterval(function () {
 				try {
 					var duration = player.getDuration();
-					if (duration > 0 && duration - player.getCurrentTime() <= 1.5) player.seekTo(0, true);
+					if (!(duration > 0)) return;
+					var tail = Math.min(20, Math.max(3, duration * 0.12));
+					if (player.getCurrentTime() >= duration - tail) player.seekTo(0, true);
 				} catch (e) {}
 			}, 250);
 		}
@@ -1192,7 +1237,6 @@
 			html.remove();
 		}
 
-		applyBlur(box);
 		layout();
 		window.addEventListener('resize', onResize);
 
@@ -1251,7 +1295,6 @@
 				applyVolume();
 			},
 			updateLook: function () {
-				applyBlur(box);
 				layout();
 			}
 		};
@@ -1733,6 +1776,12 @@
 				uk: 'Відтворювати трейлер на фоні замість зображень',
 				en: 'Play a trailer in the background instead of images'
 			},
+			cardify_s_tquality: { ru: 'Качество трейлера', uk: 'Якість трейлера', en: 'Trailer quality' },
+			cardify_s_tquality_descr: {
+				ru: 'Предел качества для RUTUBE и YouTube. YouTube при слабом интернете может опускаться ниже',
+				uk: 'Межа якості для RUTUBE і YouTube. YouTube при слабкому інтернеті може знижувати якість',
+				en: 'Quality limit for RUTUBE and YouTube. YouTube may go lower on a slow connection'
+			},
 			cardify_s_volume: { ru: 'Громкость фонового трейлера', uk: 'Гучність фонового трейлера', en: 'Background trailer volume' },
 			cardify_s_volume_descr: {
 				ru: 'Доля от текущей громкости устройства. 0% — без звука',
@@ -1840,6 +1889,12 @@
 		);
 
 		addParam({ name: 'cardify_trailers_bg', type: 'trigger', default: false }, 'cardify_s_trailer', 'cardify_s_trailer_descr');
+
+		addParam(
+			{ name: 'cardify_trailers_quality', type: 'select', values: { 720: '720p', 1080: '1080p', 1440: '1440p (2K)' }, default: '720' },
+			'cardify_s_tquality',
+			'cardify_s_tquality_descr'
+		);
 
 		var volumes = {};
 		for (var v = 0; v <= 100; v += 5) volumes[v] = v === 0 ? '0% (' + t('cardify_s_muted') + ')' : v + '%';
