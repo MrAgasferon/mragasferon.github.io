@@ -1,12 +1,13 @@
 /*
- * Cardify (RUTUBE) — оформление полной карточки для Lampa.
+ * Cardify+ — оформление полной карточки для Lampa.
  *
  * Основа — украинский мод Cardify. Изменения:
  *  - убраны обфускация, мёртвый код и блокировка bylampa.online;
  *  - источник фонового трейлера на выбор: RUTUBE (по умолчанию; поиск как в плагине rutube_trailer:
  *    кэш trailer.rootu.top по TMDB id → поиск RUTUBE, играет через <video> + HLS) или YouTube
  *    (ролики из данных TMDB, IFrame API);
- *  - «Авто» в масштабе: кадр под экран, вшитые чёрные полосы RUTUBE-роликов находятся и обрезаются;
+ *  - «Авто» в масштабе: кадр под экран, вшитые чёрные полосы находятся и обрезаются
+ *    (RUTUBE — по кадрам видео или превью, YouTube — по автокадрам-превью);
  *  - трейлер и слайдшоу ставятся на паузу, пока открыт плеер или активна другая карточка;
  *  - интерфейс через Lampa.Lang (ru / uk / en).
  * Ключи настроек прежние (cardify_*), старые значения подхватятся.
@@ -21,7 +22,8 @@
 	// Константы
 	// ---------------------------------------------------------------------------
 
-	var VERSION = '2.5';
+	var PLUGIN_NAME = 'Cardify+';
+	var VERSION = '2.7';
 	var TRAILER_START_TIMEOUT = 15000;  // мс ожидания старта видео, дальше — следующий ролик или слайдшоу
 	var MAX_TRAILER_CANDIDATES = 3;     // сколько найденных роликов пробовать по очереди
 	var ROOTU_CACHE_PATH = 'trailer.rootu.top/search/';
@@ -494,11 +496,14 @@
 	// ---------------------------------------------------------------------------
 
 	var NO_BARS = { t: 0, b: 0, l: 0, r: 0 };
-	var DETECT_SAMPLE_WIDTH = 128; // ширина уменьшенного кадра для поиска полос, px
-	var DETECT_INTERVAL = 500;     // мс между пробами кадра
-	var DETECT_SAMPLES = 3;        // сколько светлых кадров нужно для решения
-	var DETECT_MAX_ATTEMPTS = 16;  // ~8 с проб, дальше — без обрезки
-	var DARK_LUMA = 32;            // яркость (0–255), ниже которой пиксель считается чёрным
+	var DETECT_SAMPLE_WIDTH = 128;   // ширина уменьшенного кадра для поиска полос, px
+	var DETECT_PRE_INTERVAL = 400;   // мс между пробами до показа
+	var DETECT_PRE_ATTEMPTS = 10;    // ≤ 4 с до показа
+	var DETECT_POST_INTERVAL = 1000; // мс между пробами после показа (уточнение)
+	var DETECT_POST_ATTEMPTS = 30;   // ≤ 30 с уточнения
+	var DETECT_LIT_MIN = 0.05;       // кадр с меньшей долей светлых пикселей не учитываем
+	var DETECT_SOLID = 0.25;         // «светлый» кадр — по нему видна граница картинки
+	var DARK_LUMA = 32;              // яркость (0–255), ниже которой пиксель считается чёрным
 
 	function trailerSource() {
 		return Lampa.Storage.field('cardify_trailers_source') === 'youtube' ? 'youtube' : 'rutube';
@@ -574,151 +579,242 @@
 		return Math.round(x * 100) + '%';
 	}
 
-	// Один кадр → доли полос. 'empty' — кадр не читается (прозрачный), 'dark' — по кадру не понять
-	function analyzeFrame(video, canvas, ctx) {
-		var vw = video.videoWidth;
-		var vh = video.videoHeight;
-		if (!vw || !vh) return null;
+	// ---------------------------------------------------------------------------
+	// Поиск вшитых чёрных полос
+	//
+	// По каждой строке и столбцу копится максимум доли светлых пикселей по всем кадрам.
+	// Полоса — край, который тёмный во всех кадрах: тёмные сцены и титры на чёрном
+	// не дают ложных полос, потому что любой светлый кадр «засвечивает» свои строки.
+	// ---------------------------------------------------------------------------
 
-		var w = DETECT_SAMPLE_WIDTH;
-		var h = Math.max(16, Math.round((w * vh) / vw));
-		if (canvas.width !== w) canvas.width = w;
-		if (canvas.height !== h) canvas.height = h;
-
-		ctx.drawImage(video, 0, 0, w, h);
-		var px = ctx.getImageData(0, 0, w, h).data; // SecurityError, если кадр с чужого домена без CORS
-
-		var opaque = false;
-		for (var a = 3; a < px.length; a += 28) {
-			if (px[a] !== 0) {
-				opaque = true;
-				break;
-			}
-		}
-		if (!opaque) return 'empty';
-
-		function bright(x, y) {
-			var o = (y * w + x) * 4;
-			return 0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2] > DARK_LUMA;
-		}
-
-		// строка/столбец «чёрные», если светлых пикселей не больше 2 % (шум, мелкий логотип)
-		function rowDark(y) {
-			var n = 0;
-			for (var x = 0; x < w; x++) if (bright(x, y)) n++;
-			return n <= w * 0.02;
-		}
-
-		function colDark(x, y0, y1) {
-			var n = 0;
-			for (var y = y0; y < y1; y++) if (bright(x, y)) n++;
-			return n <= (y1 - y0) * 0.02;
-		}
-
-		var top = 0;
-		while (top < h && rowDark(top)) top++;
-		if (top >= h) return 'dark';
-
-		var bottom = 0;
-		while (bottom < h - top && rowDark(h - 1 - bottom)) bottom++;
-
-		var left = 0;
-		while (left < w && colDark(left, top, h - bottom)) left++;
-
-		var right = 0;
-		while (right < w - left && colDark(w - 1 - right, top, h - bottom)) right++;
-
-		// логотип студии на чёрном и т.п.
-		if (w - left - right < w * 0.4 || h - top - bottom < h * 0.4) return 'dark';
-
-		// тёмная сцена — край картинки неотличим от полосы
-		var lit = 0;
-		var total = 0;
-		for (var y = top; y < h - bottom; y += 2) {
-			for (var x = left; x < w - right; x += 2) {
-				total++;
-				if (bright(x, y)) lit++;
-			}
-		}
-		if (lit < total * 0.3) return 'dark';
-
-		// полосы считаем симметричными: так не мешают субтитры в нижней полосе и тёмное небо сверху
-		return {
-			v: Math.max(top, bottom) / h,
-			hz: Math.max(left, right) / w,
-			rowStep: 1 / h,
-			colStep: 1 / w
-		};
-	}
-
-	// Несколько светлых кадров → общие полосы (минимум по кадрам: светлая сцена показывает
-	// настоящую границу картинки). Решение принимается один раз — кадр потом не прыгает
-	function detectBars(video, done) {
+	function createBarsMeter() {
 		var canvas = document.createElement('canvas');
 		var ctx = null;
 		try {
 			ctx = canvas.getContext('2d', { willReadFrequently: true });
 		} catch (e) {}
-		if (!ctx) {
-			done(NO_BARS, 'canvas недоступен');
-			return noop;
+
+		var w = 0;
+		var h = 0;
+		var rowMax = [];
+		var colMax = [];
+		var meter = { ok: !!ctx, good: 0, solid: 0, empty: 0 };
+
+		function reset(nw, nh) {
+			w = nw;
+			h = nh;
+			canvas.width = w;
+			canvas.height = h;
+			rowMax = [];
+			colMax = [];
+			for (var y = 0; y < h; y++) rowMax.push(0);
+			for (var x = 0; x < w; x++) colMax.push(0);
+			meter.good = 0;
+			meter.solid = 0;
 		}
 
-		var found = [];
-		var attempts = 0;
-		var empty = 0;
-		var finished = false;
-		var timer = null;
+		// source — <video> или <img>, sw/sh — размер его кадра.
+		// 'good' — кадр учтён, 'black' — почти чёрный, 'empty' — прозрачный (кадр не читается).
+		// Бросает SecurityError, если кадр с чужого домена без CORS
+		meter.add = function (source, sw, sh) {
+			if (!sw || !sh) return 'black';
 
-		function finish(note) {
-			if (finished) return;
-			finished = true;
-			clearInterval(timer);
-			if (!found.length) return done(NO_BARS, note || 'светлых кадров нет');
+			var nw = DETECT_SAMPLE_WIDTH;
+			var nh = Math.max(16, Math.round((nw * sh) / sw));
+			if (nw !== w || nh !== h) reset(nw, nh);
 
-			var v = 1;
-			var hz = 1;
-			found.forEach(function (f) {
-				// +1 строка анализа, чтобы не осталось тонкой тёмной каймы
-				v = Math.min(v, f.v > 0 ? f.v + f.rowStep : 0);
-				hz = Math.min(hz, f.hz > 0 ? f.hz + f.colStep : 0);
-			});
+			ctx.drawImage(source, 0, 0, w, h);
+			var px = ctx.getImageData(0, 0, w, h).data;
+
+			var opaque = false;
+			for (var a = 3; a < px.length; a += 28) {
+				if (px[a] !== 0) {
+					opaque = true;
+					break;
+				}
+			}
+			if (!opaque) {
+				meter.empty++;
+				return 'empty';
+			}
+
+			var rows = [];
+			var cols = [];
+			var lit = 0;
+			var x, y;
+			for (x = 0; x < w; x++) cols.push(0);
+
+			for (y = 0; y < h; y++) {
+				var n = 0;
+				for (x = 0; x < w; x++) {
+					var o = (y * w + x) * 4;
+					if (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2] > DARK_LUMA) {
+						n++;
+						cols[x]++;
+					}
+				}
+				rows.push(n);
+				lit += n;
+			}
+
+			var share = lit / (w * h);
+			if (share < DETECT_LIT_MIN) return 'black';
+
+			for (y = 0; y < h; y++) rowMax[y] = Math.max(rowMax[y], rows[y] / w);
+			for (x = 0; x < w; x++) colMax[x] = Math.max(colMax[x], cols[x] / h);
+
+			meter.good++;
+			if (share >= DETECT_SOLID) meter.solid++; // светлый кадр: по нему видна граница картинки
+			return 'good';
+		};
+
+		// Полосы симметричные: субтитры или логотип в одной полосе не мешают, их срезает вместе с другой
+		meter.bars = function () {
+			if (!meter.good) return NO_BARS;
+
+			var t = 0;
+			while (t < h && rowMax[t] <= 0.02) t++;
+			var b = 0;
+			while (b < h - t && rowMax[h - 1 - b] <= 0.02) b++;
+			var l = 0;
+			while (l < w && colMax[l] <= 0.02) l++;
+			var r = 0;
+			while (r < w - l && colMax[w - 1 - r] <= 0.02) r++;
+
+			var v = Math.max(t, b) / h;
+			var hz = Math.max(l, r) / w;
+			v = v > 0 ? v + 1 / h : 0; // +1 строка анализа — без тонкой тёмной каймы
+			hz = hz > 0 ? hz + 1 / w : 0;
 			if (v < 0.015) v = 0;
 			if (hz < 0.015) hz = 0;
 			v = Math.min(v, 0.3);
 			hz = Math.min(hz, 0.3);
 
-			done({ t: v, b: v, l: hz, r: hz }, 'по ' + found.length + ' кадрам');
-		}
+			return { t: v, b: v, l: hz, r: hz };
+		};
 
-		function sample() {
+		return meter;
+	}
+
+	function barsText(bars) {
+		return 'полосы сверху/снизу ' + percent(bars.t) + ', по бокам ' + percent(bars.l);
+	}
+
+	// Полосы по картинкам (превью ролика). done(bars | null, note)
+	function barsFromImages(urls, done) {
+		var meter = createBarsMeter();
+		var finished = false;
+		var left = urls.length;
+		var timer = null;
+
+		function finish() {
 			if (finished) return;
-			attempts++;
-
-			var res;
-			try {
-				res = analyzeFrame(video, canvas, ctx);
-			} catch (e) {
-				return finish('кадр не читается: ' + e.name);
-			}
-
-			if (res === 'empty') {
-				if (++empty >= 3 && !found.length) return finish('кадр не читается');
-			} else if (res && res !== 'dark') {
-				found.push(res);
-			}
-
-			if (found.length >= DETECT_SAMPLES) return finish();
-			if (attempts >= DETECT_MAX_ATTEMPTS) finish('мало светлых кадров');
+			finished = true;
+			clearTimeout(timer);
+			if (!meter.solid) return done(null, meter.good ? 'превью тёмные' : 'превью не загрузились или не читаются');
+			done(meter.bars(), 'по ' + meter.good + ' превью');
 		}
 
-		timer = setInterval(sample, DETECT_INTERVAL);
-		sample();
+		if (!meter.ok || !left) {
+			done(null, meter.ok ? 'превью нет' : 'canvas недоступен');
+			return noop;
+		}
+
+		timer = setTimeout(finish, 4000);
+
+		urls.forEach(function (url) {
+			var img = new Image();
+			img.crossOrigin = 'anonymous'; // без CORS-заголовков картинка не загрузится — это ок, просто без обрезки
+			img.onload = function () {
+				if (finished) return;
+				try {
+					meter.add(img, img.naturalWidth || img.width, img.naturalHeight || img.height);
+				} catch (e) {}
+				if (--left <= 0) finish();
+			};
+			img.onerror = function () {
+				if (--left <= 0) finish();
+			};
+			img.src = url;
+		});
 
 		return function cancel() {
 			finished = true;
-			clearInterval(timer);
+			clearTimeout(timer);
 		};
+	}
+
+	// Полосы по кадрам видео: решение до показа (≤ 4 с), потом уточнение в фоне (≤ 30 с).
+	// onDecide(bars, note) — один раз; onRefine(bars, note) — если граница заметно сдвинулась;
+	// onUnreadable(note) — кадр не читается (видео с чужого домена без CORS)
+	function watchVideoBars(video, onDecide, onRefine, onUnreadable) {
+		var meter = createBarsMeter();
+		if (!meter.ok) {
+			onUnreadable('canvas недоступен');
+			return noop;
+		}
+
+		var stopped = false;
+		var decided = false;
+		var applied = NO_BARS;
+		var attempts = 0;
+		var timer = null;
+
+		function stop() {
+			stopped = true;
+			clearInterval(timer);
+		}
+
+		function note() {
+			return 'по ' + meter.good + ' кадрам, светлых ' + meter.solid;
+		}
+
+		function sample() {
+			try {
+				meter.add(video, video.videoWidth, video.videoHeight);
+			} catch (e) {
+				stop();
+				onUnreadable('кадр не читается: ' + e.name);
+				return false;
+			}
+			if (meter.empty >= 3 && !meter.good) {
+				stop();
+				onUnreadable('кадр не читается');
+				return false;
+			}
+			return true;
+		}
+
+		function tick() {
+			if (stopped || video.paused) return; // на паузе кадр не меняется — не считаем
+			attempts++;
+			if (!sample()) return;
+
+			if (!decided) {
+				if (meter.solid < 2 && attempts < DETECT_PRE_ATTEMPTS) return;
+				decided = true;
+				applied = meter.solid ? meter.bars() : NO_BARS;
+				onDecide(applied, meter.solid ? note() : 'светлых кадров пока нет');
+				attempts = 0;
+				clearInterval(timer);
+				timer = setInterval(tick, DETECT_POST_INTERVAL);
+				return;
+			}
+
+			if (meter.solid >= 2) {
+				var next = meter.bars();
+				if (Math.abs(next.t - applied.t) >= 0.02 || Math.abs(next.l - applied.l) >= 0.02) {
+					applied = next;
+					onRefine(applied, note());
+				}
+			}
+			if (attempts >= DETECT_POST_ATTEMPTS || meter.solid >= 12) stop();
+		}
+
+		timer = setInterval(tick, DETECT_PRE_INTERVAL);
+		tick();
+
+		return stop;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -740,7 +836,8 @@
 		return Lampa.Storage.field('player_hls_method') === 'hlsjs' || chrome > 120 || !nativeHls;
 	}
 
-	function createBackgroundVideo(url, handlers) {
+	// thumbUrl — превью ролика: по нему ищем полосы, если кадр видео не читается
+	function createBackgroundVideo(url, handlers, thumbUrl) {
 		var html = $(
 			'<div class="cardify-trailer">' +
 				'<video class="cardify-trailer__video" muted playsinline webkit-playsinline preload="auto"></video>' +
@@ -762,11 +859,46 @@
 		video.loop = true;
 		applyBlur(video);
 
-		function layout() {
+		// animate — плавно, когда граница уточнилась уже после показа
+		function layout(animate) {
 			var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
 			var zoom = zoomSetting();
+			var transition = animate ? 'left .8s ease, top .8s ease, width .8s ease, height .8s ease' : '';
+			video.style.webkitTransition = transition;
+			video.style.transition = transition;
 			video.style.objectFit = 'fill';
 			placeElement(video, coverRect(aspect, zoom.auto ? bars : NO_BARS, zoom.auto ? 1 : zoom.scale));
+		}
+
+		function startFraming() {
+			if (!zoomSetting().auto) return reveal();
+
+			cancelDetect = watchVideoBars(
+				video,
+				function (found, note) {
+					bars = found;
+					log('trailer: кадр —', barsText(found), '(' + note + ')');
+					reveal();
+				},
+				function (found, note) {
+					bars = found;
+					log('trailer: кадр уточнён —', barsText(found), '(' + note + ')');
+					if (revealed) layout(true);
+				},
+				function (note) {
+					if (revealed || dead) return;
+					if (!thumbUrl) {
+						log('trailer: кадр —', note + ', без обрезки');
+						return reveal();
+					}
+					log('trailer: кадр —', note + ', ищу полосы по превью');
+					cancelDetect = barsFromImages([thumbUrl], function (found, n2) {
+						if (found) bars = found;
+						log('trailer: кадр по превью —', barsText(bars), '(' + n2 + ')');
+						reveal();
+					});
+				}
+			);
 		}
 
 		function onResize() {
@@ -943,15 +1075,7 @@
 			log('trailer: играет (' + mode + ')', video.videoWidth + 'x' + video.videoHeight, '| громкость', percent(trailerVolume()));
 
 			// Показываем, когда кадр уже подогнан: во время проб видно статичный фон
-			if (zoomSetting().auto) {
-				cancelDetect = detectBars(video, function (found, note) {
-					bars = found;
-					log('trailer: кадр — полосы сверху/снизу ' + percent(found.t) + ', по бокам ' + percent(found.l), '(' + note + ')');
-					reveal();
-				});
-			} else {
-				reveal();
-			}
+			startFraming();
 		});
 
 		video.addEventListener('resize', onResize);
@@ -1084,6 +1208,10 @@
 		var soundTimer = null;
 
 		var boxScale = 1;
+		var bars = NO_BARS;
+		var framed = !zoomSetting().auto; // в ручном масштабе полосы не ищем
+		var playReady = false;
+		var cancelThumbs = noop;
 
 		// Кадр внутри iframe не прочитать, а ролики YouTube почти всегда 16:9 — подгоняем 16:9 под экран.
 		// iframe вдвое выше картинки: заголовок и логотип YouTube у краёв уходят за экран.
@@ -1091,7 +1219,7 @@
 		// верстается под выбранное качество (1280/1920/2560 px по ширине) и масштабируется transform'ом
 		function layout() {
 			var zoom = zoomSetting();
-			var r = coverRect(16 / 9, NO_BARS, zoom.auto ? 1 : zoom.scale);
+			var r = coverRect(16 / 9, zoom.auto ? bars : NO_BARS, zoom.auto ? 1 : zoom.scale);
 			var dpr = window.devicePixelRatio || 1;
 			var w = (trailerQuality() * 16) / 9 / dpr;
 
@@ -1186,6 +1314,29 @@
 			applyVolume();
 		}
 
+		// показываем, когда ролик пошёл и кадрирование готово
+		function maybeReveal() {
+			if (playReady && framed) reveal();
+		}
+
+		// Кадр в iframe не прочитать, но YouTube сам отдаёт автокадры из ролика (25/50/75 % длины),
+		// с теми же вшитыми полосами — по ним и ищем
+		if (!framed) {
+			cancelThumbs = barsFromImages(
+				['mq1', 'mq2', 'mq3'].map(function (n) {
+					return 'https://i.ytimg.com/vi/' + videoId + '/' + n + '.jpg';
+				}),
+				function (found, note) {
+					if (dead) return;
+					if (found) bars = found;
+					framed = true;
+					log('trailer: кадр YouTube —', barsText(bars), '(' + note + ')');
+					layout();
+					maybeReveal();
+				}
+			);
+		}
+
 		// Конец ролика не показываем: там конечная заставка автора (последние 5–20 с) и плитка
 		// «другие видео». Хвост — 12 % длины, не меньше 3 и не больше 20 с; запас и на медленные
 		// приставки, где время из iframe приходит с задержкой
@@ -1211,7 +1362,10 @@
 					started = true;
 					log('trailer: играет (YouTube)', videoId, '| громкость', percent(trailerVolume()));
 					// небольшая пауза: в первые доли секунды YouTube показывает заголовок
-					revealTimer = setTimeout(reveal, 500);
+					revealTimer = setTimeout(function () {
+						playReady = true;
+						maybeReveal();
+					}, 500);
 				}
 			} else if (ev.data === S.ENDED) {
 				try {
@@ -1230,6 +1384,7 @@
 			clearTimeout(revealTimer);
 			clearTimeout(soundTimer);
 			clearInterval(endTimer);
+			cancelThumbs();
 			window.removeEventListener('resize', onResize);
 			try {
 				if (player) player.destroy();
@@ -1670,7 +1825,7 @@
 				function (streamUrl) {
 					if (destroyed) return;
 					mountTrailer(function (handlers) {
-						return createBackgroundVideo(streamUrl, handlers);
+						return createBackgroundVideo(streamUrl, handlers, item.thumbnail_url);
 					}, function (wasStarted) {
 						// упал посреди показа — на слайдшоу; не стартовал — следующий ролик
 						if (wasStarted) fallback();
@@ -1793,9 +1948,9 @@
 			cardify_s_blur_descr: { ru: 'Эффект размытия (blur) для фонового трейлера', uk: 'Ефект розмиття (blur) для фонового трейлера', en: 'Blur effect for the background trailer' },
 			cardify_s_zoom: { ru: 'Масштаб видео', uk: 'Масштабування відео', en: 'Video zoom' },
 			cardify_s_zoom_descr: {
-				ru: 'Авто — видео на весь экран, вшитые чёрные полосы обрезаются (поиск полос — только RUTUBE)',
-				uk: 'Авто — відео на весь екран, вшиті чорні смуги обрізаються (пошук смуг — лише RUTUBE)',
-				en: 'Auto: fill the screen and crop burned-in black bars (bar detection: RUTUBE only)'
+				ru: 'Авто — видео на весь экран, вшитые чёрные полосы обрезаются',
+				uk: 'Авто — відео на весь екран, вшиті чорні смуги обрізаються',
+				en: 'Auto: fill the screen and crop burned-in black bars'
 			},
 			cardify_s_zoom_auto: { ru: 'Авто — под экран', uk: 'Авто — під екран', en: 'Auto: fit screen' },
 			cardify_s_zoom_none: { ru: 'Без увеличения', uk: 'Без збільшення', en: 'No zoom' },
@@ -1880,7 +2035,14 @@
 		var off = t('cardify_s_off');
 		var sec = ' ' + t('cardify_s_sec');
 
-		Lampa.SettingsApi.addComponent({ component: 'cardify', icon: SETTINGS_ICON, name: 'Cardify' });
+		Lampa.SettingsApi.addComponent({ component: 'cardify', icon: SETTINGS_ICON, name: PLUGIN_NAME });
+
+		// первая строка — название и версия, просто текст (type 'title' не выбирается пультом)
+		Lampa.SettingsApi.addParam({
+			component: 'cardify',
+			param: { name: 'cardify_about', type: 'title' },
+			field: { name: PLUGIN_NAME + ' v' + VERSION }
+		});
 
 		addParam(
 			{ name: 'cardify_trailers_source', type: 'select', values: { rutube: 'RUTUBE', youtube: 'YouTube' }, default: 'rutube' },
