@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c1e19">
+  <meta name="description" content="Царские конюшни — конный клуб во Владивостоке. Обучение верховой езде, конные прогулки, катание детей и обучение лошадей.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Царские конюшни | Конный клуб">
+  <meta property="og:description" content="Верховая езда, конные прогулки и бережное обучение лошадей во Владивостоке.">
+  <meta property="og:image" content="assets/logo.webp">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <title>Царские конюшни — конный клуб во Владивостоке</title>
+  <style>
+    :root {
+      --bg: #081710;
+      --panel: #10281f;
+      --panel-2: #19392e;
+      --panel-3: #244438;
+      --gold: #d7b978;
+      --gold-light: #f1dca9;
+      --gold-soft: rgba(218, 190, 126, .4);
+      --cream: #f4eee1;
+      --muted: #b1bcb3;
+      --line: rgba(221, 194, 135, .23);
+      --font-title: Georgia, 'Times New Roman', serif;
+      --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; min-height: 100dvh; color: var(--cream); font-family: var(--font-body);
+      background:
+        radial-gradient(ellipse 55% 40% at 50% 0%, rgba(61, 104, 79, .32), transparent 95%),
+        radial-gradient(ellipse 40% 35% at 0% 65%, rgba(42, 85, 64, .24), transparent 100%),
+        radial-gradient(ellipse 38% 28% at 100% 80%, rgba(54, 89, 63, .25), transparent 100%),
+        #081710;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: ''; position: fixed; inset: 0; pointer-events:none; opacity: .27; z-index: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.11' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    a { color: inherit; }
+    button { font: inherit; }
+    .site-shell { position: relative; z-index: 1; width: min(100%, 520px); margin: 0 auto; padding: 28px 18px 38px; }
+    .outer-frame {
+      position: relative; padding: 33px 27px 25px; border-radius: 26px;
+      background: linear-gradient(165deg, rgba(31,66,50,.87), rgba(11,33,25,.94) 34%, rgba(10,31,23,.96) 75%, rgba(26,53,41,.91));
+      border: 1px solid rgba(219,185,121,.46); box-shadow: 0 18px 90px rgba(0,0,0,.39), inset 0 0 0 5px rgba(6,22,16,.48), inset 0 0 0 6px rgba(218,183,112,.10);
+      text-align: center; isolation: isolate;
+    }
+    .outer-frame::before, .outer-frame::after { content:''; position:absolute; pointer-events:none; inset:11px; border:1px solid rgba(215,185,120,.11); border-radius:19px; z-index:-1; }
+    .outer-frame::after { inset:17px; border-color:rgba(215,185,120,.07); }
+    .corner { position: absolute; width: 55px; height: 55px; color:var(--gold); opacity:.72; pointer-events:none; }
+    .corner.tl { top:11px; left:11px; }
+    .corner.tr { top:11px; right:11px; transform:scaleX(-1); }
+    .corner.bl { bottom:11px; left:11px; transform:scaleY(-1); }
+    .corner.br { bottom:11px; right:11px; transform:scale(-1); }
+    .eyebrow { font-size: 10px; letter-spacing:.31em; text-transform:uppercase; color:var(--gold); font-weight:600; margin-bottom:16px; }
+    .portrait-wrap { width: 158px; height: 158px; padding:5px; margin:0 auto 15px; position:relative; border-radius:50%; background:linear-gradient(140deg,#f3ddaa,#9e7336 55%,#dfbe77); box-shadow:0 0 0 1px #6b5227, 0 8px 26px rgba(0,0,0,.45), 0 0 45px rgba(202,159,77,.11); }
+    .portrait-wrap::before { content:'';position:absolute;inset:-10px;border:1px solid rgba(221,190,124,.28);border-radius:50%; }
+    .portrait-wrap img { border-radius:50%; width:100%; height:100%; display:block; object-fit:cover; }
+    .brand-name { font-family:var(--font-title);font-size: clamp(34px,7.8vw,46px);font-weight:normal;line-height:.98;letter-spacing:.012em;margin:8px 0 10px;color:var(--gold-light);text-shadow:0 2px 18px rgba(0,0,0,.3); }
+    .brand-name span { display:block; }
+    .place { display:flex;align-items:center;justify-content:center;gap:7px;color:#d2d6c8;font-size:12px;letter-spacing:.16em;text-transform:uppercase; }
+    .place svg { width:13px;height:13px;color:var(--gold); }
+    .tagline { max-width:305px; margin:20px auto 0; font-family:var(--font-title); font-style:italic; font-size:16px; line-height:1.45; color:#dcd9c9; }
+    .rule { display:flex;align-items:center;gap:14px;margin:23px auto 22px;max-width:265px; color:var(--gold); }
+    .rule::before,.rule::after{content:'';height:1px;flex:1;background:linear-gradient(90deg,transparent,var(--gold-soft));}
+    .rule::after { transform:scaleX(-1); }
+    .rule .spark { font-size:19px; line-height:1; }
+    .section-caption { color:var(--gold);letter-spacing:.23em;font-weight:650;font-size:10px;text-transform:uppercase;margin:0 0 14px; }
+    .links { display:grid;gap:10px; }
+    .link-card {
+      display:flex; align-items:center; width:100%; min-height:70px; padding:12px 14px; gap:13px;
+      appearance:none;text-align:left;text-decoration:none;cursor:pointer;color:var(--cream);
+      border:1px solid rgba(216,186,124,.26); border-radius:12px;
+      background:linear-gradient(115deg,rgba(46,84,66,.94),rgba(26,61,47,.91));
+      box-shadow:0 2px 0 rgba(3,15,10,.15), inset 0 1px 0 rgba(255,255,255,.035);
+      transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease;
+    }
+    .link-card:hover { transform:translateY(-2px);border-color:rgba(235,200,128,.66);background:linear-gradient(115deg,#345c47,#214d3a);box-shadow:0 10px 23px rgba(0,0,0,.2); }
+    .link-card:active {transform:translateY(0) scale(.995);}
+    .link-card:focus-visible, .contact-chip:focus-visible, .modal-close:focus-visible, .action-btn:focus-visible {outline:2px solid var(--gold-light);outline-offset:3px;}
+    .link-icon { width:43px;height:43px;display:grid;place-items:center;border-radius:10px;flex-shrink:0;color:var(--gold-light);background:rgba(7,27,18,.38);border:1px solid rgba(224,191,123,.18);}
+    .link-icon svg { width:22px;height:22px;stroke-width:1.65; }
+    .link-copy { display:grid;gap:5px;flex:1;min-width:0; }
+    .link-title { color:#f5efdc; font-family:var(--font-title);font-size:17px;line-height:1.15; }
+    .link-note { color:#c4cfc2; font-size:11px; letter-spacing:.005em;line-height:1.35; }
+    .arrow { color:var(--gold);display:grid;place-items:center;opacity:.85; }
+    .arrow svg {width:17px;height:17px;stroke-width:1.7;}
+    .details-gap {margin-top:16px;}
+    .details-gap .link-card { min-height:61px; }
+    .details-gap .link-icon { width:38px;height:38px; }
+    .details-gap .link-title {font-size:16px;}
+    .gold-card { margin-top:17px;padding:18px 16px;border:1px solid rgba(226,199,133,.49);border-radius:13px;background:linear-gradient(130deg,rgba(149,111,51,.26),rgba(72,68,39,.11) 58%,rgba(137,104,47,.17)); }
+    .gold-card .tiny { color:var(--gold-light); font-weight:600; font-size:10px;letter-spacing:.17em;text-transform:uppercase; }
+    .gold-card p { font-family:var(--font-title);font-size:17px;line-height:1.42;margin:9px 0 13px; }
+    .gold-button { width:100%;border:0;padding:13px;border-radius:8px;cursor:pointer;font-weight:700;letter-spacing:.035em;color:#15271e;background:linear-gradient(115deg,#f5dfac,#c59c55 65%,#e9cc8d);box-shadow:inset 0 1px 0 rgba(255,255,255,.42),0 6px 16px rgba(0,0,0,.19);transition:filter .2s,transform .2s; }
+    .gold-button:hover {filter:brightness(1.08);transform:translateY(-1px);}
+    .contact-caption {margin:22px 0 12px;color:#b3bfb3;font-size:11px;letter-spacing:.16em;text-transform:uppercase;}
+    .contact-list { display:flex;justify-content:center;gap:12px;flex-wrap:wrap; }
+    .contact-chip { width:47px;height:47px;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(212,183,115,.4);background:rgba(37,71,55,.7);color:var(--gold-light);cursor:pointer;transition:background .2s,transform .2s; }
+    .contact-chip:hover {background:#345b46;transform:translateY(-2px);}
+    .contact-chip svg {width:21px;height:21px;}
+    .bottom-footer { margin-top:22px;color:#96a69b;font-size:11px;line-height:1.6; }
+    .bottom-footer .est {color:var(--gold);letter-spacing:.19em;font-family:var(--font-title);font-size:15px;margin-bottom:6px;}
+    .demo-pill {display:inline-block;margin-top:15px;color:#c6d6c4;background:rgba(255,255,255,.055);border:1px dashed rgba(218,186,126,.26);border-radius:999px;padding:8px 12px;font-size:11px;}
+    .overlay {position:fixed;z-index:10;inset:0;display:grid;place-items:end center;padding:16px;background:rgba(1,13,8,.77);backdrop-filter:blur(5px);opacity:0;visibility:hidden;transition:opacity .24s,visibility .24s;}
+    .overlay.is-open {opacity:1;visibility:visible;}
+    .modal {position:relative;width:min(100%,480px);background:linear-gradient(145deg,#204435,#10281e 72%);border:1px solid rgba(227,195,130,.56);box-shadow:0 20px 80px rgba(0,0,0,.55);border-radius:18px;padding:30px 25px 24px;text-align:left;transform:translateY(22px);transition:transform .24s;}
+    .overlay.is-open .modal {transform:translateY(0);}
+    .modal-close {position:absolute;right:14px;top:12px;background:transparent;border:0;color:var(--gold-light);font-size:26px;line-height:1;cursor:pointer;padding:3px 7px;}
+    .modal-kicker {color:var(--gold);text-transform:uppercase;letter-spacing:.2em;font-size:11px;margin:0 0 10px;}
+    .modal h2 {font-family:var(--font-title);font-weight:normal;font-size:30px;color:var(--gold-light);line-height:1.1;margin:0 28px 15px 0;}
+    .modal p {color:#d6e0d6;line-height:1.65;font-size:14px;margin:0 0 16px;}
+    .modal ul {padding:0;margin:0 0 21px;list-style:none;display:grid;gap:10px;}
+    .modal li {display:flex;align-items:start;gap:10px;font-size:13px;color:#e1e6dc;line-height:1.5;}
+    .modal li::before {content:'✦';color:var(--gold);flex-shrink:0;}
+    .modal .action-btn {display:block;width:100%;text-align:center;border:1px solid rgba(233,206,148,.57);border-radius:10px;padding:14px;background:linear-gradient(105deg,#d7b671,#f3dda3);font-weight:700;color:#173228;cursor:pointer;text-decoration:none;}
+    .toast {position:fixed;z-index:30;left:50%;bottom:22px;transform:translate(-50%,16px);width:max-content;max-width:calc(100vw - 32px);padding:13px 17px;text-align:center;border-radius:12px;border:1px solid rgba(217,184,112,.5);background:#264434;color:var(--cream);box-shadow:0 10px 38px rgba(0,0,0,.37);font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;}
+    .toast.visible {transform:translate(-50%,0);opacity:1;}
+    @media(min-width:650px){.site-shell{padding-top:35px;padding-bottom:45px;}.outer-frame{padding:40px 38px 30px;}.overlay{place-items:center;}.modal{padding:36px 32px 29px;}}
+    @media(max-width:380px){.site-shell{padding:10px 9px 20px;}.outer-frame{padding:30px 17px 22px;border-radius:20px;}.brand-name{font-size:36px;}.portrait-wrap{width:140px;height:140px;}.link-title{font-size:16px;}.link-note{font-size:10px;}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}*,*::before,*::after{animation:none!important;transition:none!important;}}
+    @keyframes rise{from{opacity:0;transform:translateY(13px);}to{opacity:1;transform:translateY(0);}}
+    .portrait-wrap,.brand-name,.place,.tagline,.rule,.links,.gold-card,.contact-list {animation:rise .7s both;}
+    .brand-name {animation-delay:.06s;}.place {animation-delay:.1s;}.tagline {animation-delay:.14s;}.rule {animation-delay:.18s;}.links {animation-delay:.23s;}.gold-card {animation-delay:.32s;}.contact-list {animation-delay:.38s;}
+  </style>
+</head>
+<body>
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden">
+ <symbol id="i-pin" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M20 10c0 5.1-8 11-8 11S4 15.1 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.6" fill="none" stroke="currentColor"/></symbol>
+ <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round" fill="none"/></symbol>
+ <symbol id="i-rider" viewBox="0 0 24 24"><circle cx="15" cy="3.6" r="2" fill="none" stroke="currentColor"/><path d="m13 7-3 4 3 3 1 6M3 15l4-4 4 1 4 3h5l2 3M7 20l2-5m7 0 2 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+ <symbol id="i-horse" viewBox="0 0 24 24"><path d="M4 21V11l5-8 4 3 3-1 4 6-2 4-4 1-2 5M9 3l1 5m8 7v6M6 14l4 2 2 5M10 9h.01" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+ <symbol id="i-child" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3" stroke="currentColor" fill="none"/><path d="m5 14 7-4 7 4M12 10v6m-5 5 5-5 5 5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+ <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 5.7a5.5 5.5 0 0 0-7.8 0L12 6.8l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.5a5.5 5.5 0 0 0 0-7.8Z" fill="none" stroke="currentColor" stroke-linejoin="round"/></symbol>
+ <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M3 6h2M3 12h2M3 18h2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-width="1.8"/></symbol>
+ <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 11.3a8.5 8.5 0 0 1-8.5 8.5 9 9 0 0 1-3.5-.7L3 21l1.9-5.7a8.5 8.5 0 1 1 16.1-4Z" stroke="currentColor" fill="none" stroke-linejoin="round"/></symbol>
+ <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.6 3H4.5A2.5 2.5 0 0 0 2 5.7c.9 8.5 7.8 15.4 16.3 16.3A2.5 2.5 0 0 0 21 19.5v-2.1l-5.5-2.3-2.2 2.2a14.7 14.7 0 0 1-6.6-6.6l2.2-2.2L6.6 3Z" stroke="currentColor" fill="none" stroke-linejoin="round"/></symbol>
+ <symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" fill="none"/><circle cx="12" cy="12" r="4" stroke="currentColor" fill="none"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></symbol>
+ <symbol id="i-telegram" viewBox="0 0 24 24"><path fill="currentColor" d="M20.6 4.1 2.7 11a1 1 0 0 0 .1 1.9l4.5 1.4 1.6 5a1 1 0 0 0 1.7.4l2.5-2.6 4.6 3.3a1.3 1.3 0 0 0 2-.8l3-13.7a1.6 1.6 0 0 0-2.1-1.8Zm-10 11.8-.4 2.7-1.3-4.2L19.8 6l-9.2 9.9Z"/></symbol>
+ <symbol id="i-whatsapp" viewBox="0 0 24 24"><path d="M19.5 4.5a10.5 10.5 0 0 0-16 13.3L2 22l4.4-1.5a10.5 10.5 0 0 0 13.1-16Z" stroke="currentColor" fill="none" stroke-linejoin="round"/><path d="M8.6 7.5c-.5-.2-1 0-1.4.5-1.5 1.8 1.6 4 .7 5.4 1.4 2 3.4 3.6 5.7 4.1 1.5.4 3 .2 4.1-1l-2.4-1.7-1.2 1c-1.4-.6-2.6-1.7-3.3-3.1l.9-1.1-1.2-2.1Z" stroke="currentColor" fill="none" stroke-linejoin="round"/></symbol>
+ <symbol id="i-corner" viewBox="0 0 70 70"><path d="M4 64V16C4 9 9 4 16 4h48M12 58V22c0-6 4-10 10-10h36M18 52c0-21 14-34 34-34M23 49c0-12 10-22 23-23M29 44c-2-9 1-16 9-22M44 29c-8 1-13 5-15 13" stroke="currentColor" fill="none" stroke-width="1" opacity=".75"/><path d="M20 11c11 0 16 5 17 14-11 0-18-4-17-14Zm-8 16c8 2 11 9 9 17-8-2-11-8-9-17Z" fill="currentColor" opacity=".46"/></symbol>
+</svg>
+<main class="site-shell">
+  <section class="outer-frame" aria-label="Конный клуб Царские конюшни">
+    <svg class="corner tl"><use href="#i-corner"/></svg><svg class="corner tr"><use href="#i-corner"/></svg><svg class="corner bl"><use href="#i-corner"/></svg><svg class="corner br"><use href="#i-corner"/></svg>
+    <div class="eyebrow">Конный клуб · Владивосток</div>
+    <div class="portrait-wrap"><img src="assets/logo.webp" width="158" height="158" alt="Герб конного клуба «Царские конюшни»: белая лошадь в золотом барочном обрамлении"></div>
+    <h1 class="brand-name"><span>Царские</span><span>конюшни</span></h1>
+    <div class="place"><svg><use href="#i-pin"/></svg> Владивосток</div>
+    <p class="tagline">Искусство верховой езды<br>и гармония с лошадью</p>
+    <div class="rule" aria-hidden="true"><span class="spark">✦</span></div>
+    <p class="section-caption">Наши направления</p>
+    <nav class="links" aria-label="Услуги клуба">
+      <button class="link-card" data-service="lessons" type="button"><span class="link-icon"><svg><use href="#i-rider"/></svg></span><span class="link-copy"><span class="link-title">Обучение верховой езде</span><span class="link-note">Занятия и секция для взрослых</span></span><span class="arrow"><svg><use href="#i-arrow"/></svg></span></button>
+      <button class="link-card" data-service="rides" type="button"><span class="link-icon"><svg><use href="#i-horse"/></svg></span><span class="link-copy"><span class="link-title">Конные прогулки</span><span class="link-note">Время на природе рядом с лошадьми</span></span><span class="arrow"><svg><use href="#i-arrow"/></svg></span></button>
+      <button class="link-card" data-service="kids" type="button"><span class="link-icon"><svg><use href="#i-child"/></svg></span><span class="link-copy"><span class="link-title">Катание для детей</span><span class="link-note">Знакомство с лошадьми для самых маленьких</span></span><span class="arrow"><svg><use href="#i-arrow"/></svg></span></button>
+      <button class="link-card" data-service="training" type="button"><span class="link-icon"><svg><use href="#i-heart"/></svg></span><span class="link-copy"><span class="link-title">Обучение лошадей</span><span class="link-note">Бережный подход и мягкие методики</span></span><span class="arrow"><svg><use href="#i-arrow"/></svg></span></button>
+    </nav>
+    <div class="links details-gap">
+      <button class="link-card" data-service="prices" type="button"><span class="link-icon"><svg><use href="#i-list"/></svg></span><span class="link-copy"><span class="link-title">Стоимость услуг</span><span class="link-note">Актуальные условия и форматы занятий</span></span><span class="arrow"><svg><use href="#i-arrow"/></svg></span></button>
+      <button class="link-card" data-service="location" type="button"><span class="link-icon"><svg><use href="#i-pin"/></svg></span><span class="link-copy"><span class="link-title">Как нас найти</span><span class="link-note">Адрес клуба и маршрут</span></span><span class="arrow"><svg><use href="#i-arrow"/></svg></span></button>
+    </div>
+    <div class="gold-card">
+      <div class="tiny">Добро пожаловать</div>
+      <p>Ваше знакомство с миром лошадей начинается здесь</p>
+      <button class="gold-button" id="main-cta" type="button">Связаться с клубом &nbsp;↗</button>
+    </div>
+    <div id="contacts" class="contact-caption">Мы на связи</div>
+    <div class="contact-list" aria-label="Способы связи">
+      <button type="button" class="contact-chip" data-contact="telegram" aria-label="Telegram" title="Telegram"><svg><use href="#i-telegram"/></svg></button>
+      <button type="button" class="contact-chip" data-contact="whatsapp" aria-label="WhatsApp" title="WhatsApp"><svg><use href="#i-whatsapp"/></svg></button>
+      <button type="button" class="contact-chip" data-contact="phone" aria-label="Телефон" title="Позвонить"><svg><use href="#i-phone"/></svg></button>
+      <button type="button" class="contact-chip" data-contact="instagram" aria-label="Instagram" title="Instagram"><svg><use href="#i-camera"/></svg></button>
+    </div>
+    <footer class="bottom-footer"><div class="est">✧ ЦК ✧</div>Царские конюшни · Владивосток<br><span>С любовью и уважением к лошадям</span><div class="demo-pill">Демо-страница · контакты и цены ещё не указаны</div></footer>
+  </section>
+</main>
+<div class="overlay" id="overlay" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
+    <button class="modal-close" id="modal-close" type="button" aria-label="Закрыть">×</button>
+    <div class="modal-kicker">Царские конюшни</div>
+    <h2 id="modal-title"></h2>
+    <p id="modal-description"></p>
+    <ul id="modal-points"></ul>
+    <button class="action-btn" id="modal-action" type="button">Уточнить подробности</button>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+  // НАСТРОЙКИ — заполните перед публикацией. Если значение пустое, будет показано уведомление.
+  const SETTINGS = {
+    telegram: '',    // например: https://t.me/your_club
+    whatsapp: '',    // например: https://wa.me/79991234567
+    phone: '',       // например: +79991234567
+    instagram: '',   // например: https://www.instagram.com/your_club/
+    maps: ''         // ссылка на точку в Яндекс Картах или 2ГИС
+  };
+  // Тексты ниже — демо-описания. Уточните реальные правила, формат и стоимость занятий.
+  const SERVICES = {
+    lessons: {
+      title: 'Обучение верховой езде',
+      description: 'Откройте для себя верховую езду и уверенное общение с лошадью. Формат и условия занятий уточняются при записи.',
+      points: ['Занятия для взрослых', 'Секция верховой езды', 'Знакомство с основами взаимодействия с лошадью']
+    },
+    rides: {
+      title: 'Конные прогулки',
+      description: 'Возможность отвлечься от городского ритма и провести время с лошадьми. Детали маршрута и условия участия уточняйте у клуба.',
+      points: ['Прогулки с лошадьми', 'Красивые впечатления на природе', 'Формат и продолжительность — по согласованию']
+    },
+    kids: {
+      title: 'Катание для детей',
+      description: 'Первое знакомство ребёнка с миром лошадей. Возрастные ограничения и сопровождение уточняйте перед посещением.',
+      points: ['Катание для детей', 'Бережное знакомство с лошадьми', 'Условия посещения — при записи']
+    },
+    training: {
+      title: 'Обучение лошадей',
+      description: 'В работе с лошадьми клуб делает акцент на мягкие методики и уважительное взаимодействие.',
+      points: ['Мягкие подходы к обучению', 'Внимание к индивидуальным особенностям', 'Обсуждение задач перед началом работы']
+    },
+    prices: {
+      title: 'Стоимость услуг',
+      description: 'Прайс для пробной версии пока не заполнен. Здесь можно разместить цены на индивидуальные занятия, секцию, прогулки и детское катание.',
+      points: ['Обучение верховой езде — цену добавить', 'Конные прогулки — цену добавить', 'Катание для детей — цену добавить', 'Обучение лошадей — по согласованию']
+    },
+    location: {
+      title: 'Как нас найти',
+      description: 'Конный клуб «Царские конюшни» находится во Владивостоке. Точный адрес и точку на карте добавим после получения данных.',
+      points: ['Город: Владивосток', 'Адрес: ещё не указан', 'Маршрут: добавим ссылку на карту']
+    }
+  };
+  const overlay = document.getElementById('overlay');
+  const toast = document.getElementById('toast');
+  const action = document.getElementById('modal-action');
+  const modal = overlay.querySelector('.modal');
+  let returnFocus = null;
+  let toastTimer;
+  function notify(message) {
+    toast.textContent = message;
+    toast.classList.add('visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('visible'), 3300);
+  }
+  function closeModal() {
+    overlay.classList.remove('is-open');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if (returnFocus) returnFocus.focus();
+  }
+  function openModal(key) {
+    const data = SERVICES[key];
+    if (!data) return;
+    returnFocus = document.activeElement;
+    document.getElementById('modal-title').textContent = data.title;
+    document.getElementById('modal-description').textContent = data.description;
+    document.getElementById('modal-points').replaceChildren(...data.points.map(point => {
+      const li = document.createElement('li'); li.textContent = point; return li;
+    }));
+    action.textContent = key === 'location' ? 'Открыть маршрут' : 'Уточнить подробности';
+    action.onclick = () => {
+      closeModal();
+      if (key === 'location') contact('maps'); else contact('telegram');
+    };
+    overlay.classList.add('is-open');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    modal.focus();
+  }
+  function contact(method) {
+    const target = SETTINGS[method].trim();
+    if (!target) {
+      const names = {telegram:'Telegram',whatsapp:'WhatsApp',phone:'телефон',instagram:'Instagram',maps:'маршрут'};
+      notify(`Демо-версия: ${names[method]} ещё не подключён`);
+      return;
+    }
+    if (method === 'phone') { window.location.href = `tel:${target.replace(/[^+\d]/g,'')}`; return; }
+    if (!/^https:\/\//i.test(target)) { notify('Укажите полную HTTPS-ссылку в настройках'); return; }
+    window.open(target, '_blank', 'noopener,noreferrer');
+  }
+  document.querySelectorAll('[data-service]').forEach(button => button.addEventListener('click', () => openModal(button.dataset.service)));
+  document.querySelectorAll('[data-contact]').forEach(button => button.addEventListener('click', () => contact(button.dataset.contact)));
+  document.getElementById('main-cta').addEventListener('click', () => contact('telegram'));
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  overlay.addEventListener('click', event => { if (event.target === overlay) closeModal(); });
+  document.addEventListener('keydown', event => {
+    if (!overlay.classList.contains('is-open')) return;
+    if (event.key === 'Escape') closeModal();
+    if (event.key === 'Tab') {
+      const items = [...overlay.querySelectorAll('button')];
+      if (event.shiftKey && document.activeElement === items[0]) {items.at(-1).focus();event.preventDefault();}
+      else if (!event.shiftKey && document.activeElement === items.at(-1)) {items[0].focus();event.preventDefault();}
+    }
+  });
+</script>
+</body>
+</html>
