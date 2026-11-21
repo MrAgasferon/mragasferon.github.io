@@ -283,7 +283,8 @@
       const btn = el('button', 'link-card');
       btn.type = 'button';
       btn.dataset.service = String(index);
-      const icon = el('span','link-icon'); icon.append(svgIcon(service.icon));
+      const iconName = service.icon === 'horse' && String(service.title).trim().toLowerCase() === 'конные прогулки' ? 'trail' : service.icon;
+      const icon = el('span','link-icon'); icon.append(svgIcon(iconName));
       const copy = el('span','link-copy');
       copy.append(el('span','link-title',service.title),el('span','link-note',service.subtitle));
       const arrow = el('span','arrow');
