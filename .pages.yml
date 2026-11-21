@@ -1,0 +1,174 @@
+media:
+  - name: images
+    label: Фотографии и логотипы
+    input: assets/uploads
+    output: /assets/uploads
+    categories: [image]
+    rename: safe
+
+content:
+  - name: main
+    label: Главная страница
+    type: file
+    path: data/site.json
+    format: json
+    fields:
+      - name: club_name
+        label: Название клуба
+        type: string
+        required: true
+      - name: city
+        label: Город
+        type: string
+      - name: eyebrow
+        label: Надпись над логотипом
+        type: string
+      - name: logo
+        label: Логотип
+        type: image
+        options:
+          media: images
+      - name: tagline
+        label: Девиз под названием
+        type: text
+        description: Можно переносить строки.
+      - name: section_title
+        label: Заголовок над услугами
+        type: string
+      - name: welcome_label
+        label: Заголовок блока приглашения
+        type: string
+      - name: welcome_text
+        label: Текст приглашения
+        type: text
+      - name: cta_text
+        label: Текст большой кнопки
+        type: string
+      - name: contacts_title
+        label: Заголовок контактов
+        type: string
+      - name: footer_text
+        label: Текст внизу страницы
+        type: text
+      - name: demo_mode
+        label: Показывать отметку о демо-версии
+        type: boolean
+      - name: demo_text
+        label: Сообщение о демо-версии
+        type: string
+
+  - name: services
+    label: Услуги клуба
+    type: file
+    path: data/services.json
+    format: json
+    list: true
+    fields:
+      - name: title
+        label: Название услуги
+        type: string
+        required: true
+      - name: subtitle
+        label: Короткое описание на кнопке
+        type: string
+      - name: icon
+        label: Значок на кнопке
+        type: select
+        options:
+          values:
+            - name: rider
+              label: Всадник
+            - name: horse
+              label: Лошадь
+            - name: child
+              label: Для детей
+            - name: heart
+              label: Сердце
+            - name: list
+              label: Список
+            - name: pin
+              label: Адрес
+      - name: enabled
+        label: Показывать услугу на сайте
+        type: boolean
+      - name: description
+        label: Подробное описание
+        type: text
+      - name: points
+        label: Пункты внутри карточки
+        type: string
+        list: true
+
+  - name: prices
+    label: Прайс
+    type: file
+    path: data/prices.json
+    format: json
+    fields:
+      - name: intro
+        label: Вступление к прайсу
+        type: text
+      - name: items
+        label: Позиции прайса
+        type: object
+        list:
+          collapsible:
+            collapsed: true
+            summary: '{name} — {price}'
+        fields:
+          - name: name
+            label: Услуга
+            type: string
+            required: true
+          - name: price
+            label: Стоимость (как текст)
+            type: string
+            description: 'Например: 1 500 ₽ / занятие'
+          - name: details
+            label: Дополнительные условия
+            type: string
+
+  - name: contacts
+    label: Контакты и адрес
+    type: file
+    path: data/contacts.json
+    format: json
+    fields:
+      - name: telegram
+        label: Telegram (полная ссылка https://t.me/...)
+        type: string
+      - name: whatsapp
+        label: WhatsApp (полная ссылка https://wa.me/...)
+        type: string
+      - name: phone
+        label: Телефон (+7...)
+        type: string
+      - name: instagram
+        label: Instagram (полная ссылка)
+        type: string
+      - name: maps
+        label: Ссылка на Яндекс Карты или 2ГИС (https://...)
+        type: string
+      - name: address
+        label: Адрес клуба
+        type: string
+      - name: location_note
+        label: Дополнительная информация о дороге
+        type: text
+
+  - name: gallery
+    label: Фотогалерея
+    type: file
+    path: data/gallery.json
+    format: json
+    list: true
+    fields:
+      - name: image
+        label: Фотография
+        type: image
+        required: true
+        options:
+          media: images
+      - name: caption
+        label: Подпись (необязательно)
+        type: string
