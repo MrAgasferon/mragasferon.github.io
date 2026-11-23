@@ -37,7 +37,7 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
 .reco-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.reco-actions .btn{font-size:11px;padding:8px 5px}.reco .gain{font-size:19px}
 .heatmap{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.heat{border:1px solid #32435f;border-radius:13px;padding:13px;min-height:120px;position:relative;background:color-mix(in srgb,var(--heat) 17%,#142037)}
 .heat .h-title{font-weight:800;font-size:13px}.heat .h-delta{font-weight:850;letter-spacing:-.03em;font-size:18px;margin:14px 0 6px}.heat .h-meta{color:#afc0df;font-size:11px}.heat .h-bar{height:4px;margin-top:10px;border-radius:4px;background:#34425e;overflow:hidden}.heat .h-bar i{display:block;background:var(--heat);height:100%;border-radius:4px}
-.compare-grid,.plan-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.compare-box,.plan-box{background:#101e31;border:1px solid #3a4e6b;border-radius:15px;padding:16px;min-width:0}.compare-box h3,.plan-box h3{font-size:14px;margin:0 0 7px}.compare-box .money,.plan-box .money{font-size:23px;font-weight:850;letter-spacing:-.03em;margin:10px 0}.compare-box p,.plan-box p{margin:7px 0;color:#b0c1de;font-size:12px}.compare-box button,.plan-box button{width:100%;margin-top:11px}.compare-note{color:#b2c3e0;font-size:12px;margin-top:14px}
+.compare-grid,.plan-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.compare-box,.plan-box{background:#101e31;border:1px solid #3a4e6b;border-radius:15px;padding:16px;min-width:0}.compare-box h3,.plan-box h3{font-size:14px;margin:0 0 7px}.compare-box .money,.plan-box .money{font-size:23px;font-weight:850;letter-spacing:-.03em;margin:10px 0}.compare-box p,.plan-box p{margin:7px 0;color:#b0c1de;font-size:12px}.compare-box button,.plan-box button{width:100%;margin-top:11px}.compare-note{color:#b2c3e0;font-size:12px;margin-top:14px}.plan-box .plan-tradeoff{color:#c0d2f4;font-size:12px;line-height:1.5;border-left:2px solid #8ea2ff;padding-left:10px;margin:10px 0 14px}
 .plan-span{border-bottom:1px solid #2d3f58;padding:7px 0;font-size:12px;color:#d7e2f7}.plan-span:last-child{border:0}.plan-span b{display:block;font-size:13px;color:#eff4ff}.plan-box.selected{border-color:#6c86d0}
 .row-between{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.select-mini{max-width:145px;font-size:12px}
 .form-warning{margin-top:10px;color:#f2c58d;font-size:12px}.badge-sm{font-size:10px;padding:3px 8px;border-radius:30px;border:1px solid #45587b;color:#b9cbec}
@@ -82,6 +82,12 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
 .local-data-panel .storage-footnote{color:#a9bad4;font-size:12px;margin:10px 0 0}
 .local-data-panel .feedback{margin-top:13px}
 @media(max-width:560px){.local-data-actions{display:grid;grid-template-columns:1fr}.local-data-actions .btn{width:100%}}
+/* Salary type is a display preference; calculations continue using the entered amount. */
+.salary-mode{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:12px;padding:4px;border:1px solid #394968;border-radius:13px;background:#101b30}
+.salary-mode button{font-size:12px;font-weight:750;padding:9px 6px;border-radius:9px;border:1px solid transparent;background:transparent;color:#aebedb;min-width:0}
+.salary-mode button:hover{color:#f1f5ff;background:#223150}
+.salary-mode button.active{background:#344d7b;border-color:#6e8bd3;color:#f8faff}
+.salary-hint{min-height:36px}
 </style></head><body>
 <div class="container">
  <header class="head">
@@ -91,11 +97,11 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
  <nav class="tabs" aria-label="Разделы"><button class="tab active" type="button" data-tab="calculator">Калькулятор</button><button class="tab" type="button" data-tab="planner">Планировщик и сравнение</button><button class="tab" type="button" data-tab="settings">Настройки</button><button class="tab tab-docs" type="button" data-tab="documentation">Документация</button></nav>
  <section class="view active" id="tab-calculator">
   <div class="layout"><aside class="sidebar">
-    <section class="panel"><h2>1. Твой доход</h2><label for="salary" class="field-label">Месячный оклад, ₽ <span class="small muted">до НДФЛ</span></label><div class="big-input"><input id="salary" type="number" min="1" max="1000000000" step="1000" value="100000" inputmode="decimal"><span class="rub">₽</span></div><p class="small muted" style="margin:10px 0 0">Предполагаем постоянный оклад, полностью отработанный расчётный период. Премии, больничные и НДФЛ не учитываются.</p></section>
+    <section class="panel"><h2>1. Твой доход</h2><label for="salary" class="field-label">Месячная зарплата, ₽ <span id="salary-type-label" class="small muted">на руки</span></label><div class="big-input"><input id="salary" type="number" min="1" max="1000000000" step="1000" value="100000" inputmode="decimal"><span class="rub">₽</span></div><div class="salary-mode" role="group" aria-label="В каком виде указана зарплата"><button type="button" data-salary-mode="net" class="active" aria-pressed="true">На руки</button><button type="button" data-salary-mode="gross" aria-pressed="false">До НДФЛ</button></div><p id="salary-hint" class="small muted salary-hint" style="margin:10px 0 0">Вводи сумму, которую получаешь на карту. Итоговые значения тоже будут приблизительно «на руки».</p></section>
     <section class="panel"><h2>2. Даты отпуска</h2><div id="periods"></div><button id="add" type="button" class="btn btn-full btn-soft">+ Добавить отпуск</button><div id="error" class="error" role="alert"></div><div class="budget"><span style="font-size:13px;color:#c6d1e9;font-weight:700">Всего доступно</span><b id="budget-total">36 дней</b></div><div class="small muted budget-sub" id="budget-status"></div><div class="slot-compare" style="margin-top:13px"><button class="btn" type="button" data-save-scenario="B">Сохранить в B</button><button class="btn" type="button" data-save-scenario="C">Сохранить в C</button></div></section>
-    <section class="panel how"><h2>Как считаем</h2><details><summary>Формулы и допущения</summary><p><b>Отпускные</b> = оклад ÷ 29,3 × оплачиваемые календарные дни.</p><p><b>Потеря оклада</b> = оклад ÷ рабочие дни месяца × пропущенные рабочие дни.</p><p><b>Разница</b> = отпускные − потеря зарплаты. Сравниваем доход за затронутые месяцы, а не дату выплаты денег.</p><p>Нерабочие федеральные праздники не входят в отпуск, но обычные и перенесённые выходные входят. Основной и дополнительный отпуск оплачиваются по одной формуле.</p><p>Для 6/1 используем самостоятельный календарь рабочих дней; расчёт предполагает равномерную оплату рабочих дней по окладу. Региональные праздники не учтены.</p></details></section>
+    <section class="panel how"><h2>Как считаем</h2><details><summary>Формулы и допущения</summary><p><b>Отпускные</b> = введённая зарплата ÷ 29,3 × оплачиваемые календарные дни.</p><p><b>Потеря зарплаты</b> = введённая зарплата ÷ рабочие дни месяца × пропущенные рабочие дни.</p><p><b>Разница</b> = отпускные − потеря зарплаты. Сравниваем доход за затронутые месяцы, а не дату выплаты денег.</p><p>Нерабочие федеральные праздники не входят в отпуск, но обычные и перенесённые выходные входят. Основной и дополнительный отпуск оплачиваются по одной формуле.</p><p>Для 6/1 используем самостоятельный календарь рабочих дней; расчёт предполагает равномерную оплату рабочих дней по окладу. Региональные праздники не учтены.</p><p>Переключатель «На руки / До НДФЛ» не пересчитывает введённую сумму, а определяет, как читать результаты. Налог отдельно не рассчитывается.</p></details></section>
   </aside><main class="main">
-   <section class="results-card"><div class="kicker">Финансовый итог твоего отпуска</div><div class="result-number neutral" id="total-delta">—</div><div class="result-description" id="result-description">Укажи даты.</div><div class="four"><div class="metric"><div class="name">Отпускные</div><div id="vac-pay" class="num">—</div></div><div class="metric"><div class="name">Потеря оклада</div><div id="lost-pay" class="num">—</div></div><div class="metric"><div class="name">Всего с отпуском</div><div id="new-pay" class="num">—</div></div><div class="metric"><div class="name">Без отпуска</div><div id="base-pay" class="num">—</div></div></div><div class="result-footer"><span id="leave-count"></span><span id="leave-main"></span><span id="leave-extra"></span><span id="holiday-count"></span><span id="missed-count"></span></div></section>
+   <section class="results-card"><div class="kicker">Финансовый итог твоего отпуска · <span id="results-salary-type">на руки (приблизительно)</span></div><div class="result-number neutral" id="total-delta">—</div><div class="result-description" id="result-description">Укажи даты.</div><div class="four"><div class="metric"><div class="name">Отпускные</div><div id="vac-pay" class="num">—</div></div><div class="metric"><div class="name">Потеря оклада</div><div id="lost-pay" class="num">—</div></div><div class="metric"><div class="name">Всего с отпуском</div><div id="new-pay" class="num">—</div></div><div class="metric"><div class="name">Без отпуска</div><div id="base-pay" class="num">—</div></div></div><div class="result-footer"><span id="leave-count"></span><span id="leave-main"></span><span id="leave-extra"></span><span id="holiday-count"></span><span id="missed-count"></span></div></section>
    <section class="panel"><div class="pane-title"><h2>Разбивка по месяцам</h2><span class="pill">Оклад + отпускные</span></div><div class="tablewrap" id="breakdown"></div><div class="note">Отпускные отнесены к месяцу самого отпуска, даже если фактическая выплата была раньше. Это сравнение заработка, не календарь поступлений на карту.</div></section>
    <section class="panel"><div class="pane-title"><h2 id="heat-title">Тепловая карта — 2027</h2><span class="pill">Лучшие 14 дней каждого месяца</span></div><div class="heatmap" id="heatmap"></div><p class="small muted" style="margin:14px 0 0">Рассчитываем максимальную финансовую разницу для 14 оплачиваемых дней, если начать отпуск в указанном месяце. Период может продолжаться в следующем месяце.</p></section>
    <section class="panel"><div class="reco-top"><h2 style="margin:0">Подобрать один отпуск</h2><div class="reco-ctrl"><select id="reco-days" aria-label="Дней отпуска"><option value="7">7 дней</option><option value="14" selected>14 дней</option><option value="21">21 день</option><option value="28">28 дней</option></select><button id="find-reco" class="btn btn-primary" type="button">Подобрать</button></div></div><div class="strategy-bar" style="margin:13px 0"><button class="strategy active" data-mode="money" type="button">Максимум денег</button><button class="strategy" data-mode="rest" type="button">Максимум отдыха</button><button class="strategy" data-mode="balance" type="button">Баланс</button></div><p class="small muted" id="reco-explain">Ищем даты, при которых доход с отпускными максимален.</p><div class="reco-list" id="recommendations"></div></section>
@@ -128,7 +134,7 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
 
    <div class="doc-section"><h2>Начни с четырёх шагов</h2><div class="doc-steps">
     <article class="doc-step"><div class="doc-num">1</div><h3>Выбери год</h3><p>Вверху страницы укажи нужный год. По умолчанию доступен 2027-й; также есть 2026-й.</p></article>
-    <article class="doc-step"><div class="doc-num">2</div><h3>Введи оклад</h3><p>Укажи месячную зарплату <strong>до вычета НДФЛ</strong>. Именно от неё считается примерный заработок.</p></article>
+    <article class="doc-step"><div class="doc-num">2</div><h3>Введи зарплату</h3><p>По умолчанию выбран вариант <strong>«На руки»</strong> — введи обычную сумму после налога. Если знаешь оклад до НДФЛ, переключи способ ввода.</p></article>
     <article class="doc-step"><div class="doc-num">3</div><h3>Добавь отпуск</h3><p>Выбери даты начала и окончания. Периодов может быть несколько; дни отпуска подсчитаются сами.</p></article>
     <article class="doc-step"><div class="doc-num">4</div><h3>Посмотри результат</h3><p>Калькулятор покажет отпускные, недополученную зарплату и общий финансовый плюс или минус.</p></article>
    </div></div>
@@ -140,7 +146,7 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
     </div>
     <div class="doc-formula"><div class="doc-formula-part"><div class="doc-formula-label">Отпускные</div><div class="doc-formula-number good">47 782 ₽</div><p>Оклад 100 000 ₽, отпуск 5–18 июля 2027 года</p></div><div class="doc-formula-sign">−</div><div class="doc-formula-part"><div class="doc-formula-label">Не заработанная за отпуск зарплата</div><div class="doc-formula-number">45 455 ₽</div><p>10 пропущенных рабочих дней из 22 в июле</p></div></div>
     <div class="doc-tip"><strong>Итог примера: +2 327 ₽.</strong> Значит, за затронутый месяц расчётный доход с отпуском чуть выше дохода без него. Это <strong>не</strong> отдельная доплата и не обещание получить эту сумму на карту сверх зарплаты.</div>
-    <p class="info-line" style="margin-top:14px">Для приближённого расчёта отпускных используется среднее число календарных дней в месяце — <strong>29,3</strong>. Предполагаем постоянный оклад и полностью отработанный расчётный период. Если отпуск затрагивает несколько месяцев, сравнение рассчитывается отдельно по каждому месяцу, затем складывается.</p>
+    <p class="info-line" style="margin-top:14px">Для приближённого расчёта отпускных используется среднее число календарных дней в месяце — <strong>29,3</strong>. Предполагаем постоянный заработок и полностью отработанный расчётный период. Если отпуск затрагивает несколько месяцев, сравнение рассчитывается отдельно по каждому месяцу, затем складывается.</p><div class="doc-tip"><strong>«На руки» или «До НДФЛ»?</strong> Калькулятор не прибавляет и не вычитает налог. При выборе «На руки» он использует введённую чистую зарплату как основу и показывает ориентировочные чистые суммы. Это приближение верно, если доля налога на зарплату и отпускные сопоставима. В режиме «До НДФЛ» расчёт идёт от начисленного заработка. <strong>Сам переключатель число не переводит</strong>: при смене режима при необходимости поменяй и сумму зарплаты.</div>
    </section>
 
    <div class="doc-section"><h2>Как учитываются дни отпуска</h2><div class="doc-columns">
@@ -153,7 +159,7 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
     <div class="doc-block"><h3>Подобрать один отпуск</h3><p>Выбери 7, 14, 21 или 28 дней, затем стратегию. Калькулятор предложит подходящие даты и покажет, сколько удаётся отдыхать подряд с учётом соседних выходных и праздников.</p></div>
    </div><div class="doc-columns" style="margin-top:12px">
     <div class="doc-block"><h3>Максимум денег</h3><p>В первую очередь ищем даты с наиболее высокой финансовой разницей.</p></div>
-    <div class="doc-block"><h3>Максимум отдыха и баланс</h3><p><strong>Максимум отдыха</strong> ориентируется на длинный непрерывный отдых. <strong>Баланс</strong> ищет компромисс между длительностью отдыха и деньгами.</p></div>
+    <div class="doc-block"><h3>Максимум отдыха и баланс</h3><p><strong>Максимум отдыха</strong> ориентируется на длинный непрерывный отдых. <strong>Баланс</strong> сравнивает денежную выгоду и дополнительные дни отдыха в одинаковом масштабе и ищет промежуточный вариант между двумя крайними стратегиями. Это не обязательно среднее арифметическое сумм: результат зависит от реально доступных дат.</p></div>
    </div></div>
 
    <section class="panel doc-section"><h2>Планировщик и сравнение вариантов</h2>
@@ -176,14 +182,14 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
    </section>
 
    <section class="panel doc-section"><h2>Частые вопросы</h2><div class="doc-faq">
-    <details><summary>Почему результат отличается от расчётного листка?</summary><p>Это ориентировочный калькулятор. Он не учитывает премии, неполностью отработанные месяцы, больничные, изменение зарплаты и другие особенности среднего заработка. НДФЛ тоже не вычитается.</p></details>
+    <details><summary>Почему результат отличается от расчётного листка?</summary><p>Это ориентировочный калькулятор. Он не учитывает премии, неполностью отработанные месяцы, больничные, изменение зарплаты и другие особенности среднего заработка. НДФЛ отдельно не рассчитывается, поэтому результат «на руки» приближённый.</p></details>
     <details><summary>Когда именно придут отпускные?</summary><p>Калькулятор сравнивает заработок, а не даты фактических выплат. Отпускные могут поступить до начала отпуска, поэтому сумма за конкретный месяц на карте может отличаться от показанной.</p></details>
     <details><summary>Почему праздник не списался из отпуска?</summary><p>Федеральные нерабочие праздничные дни не входят в число календарных дней ежегодного оплачиваемого отпуска. Обычные выходные, включая перенесённые дни отдыха, входят.</p></details>
     <details><summary>Сохранятся ли мои данные?</summary><p>Оклад, отпуска, сценарии и настройки сохраняются локально в браузере. В другом браузере или на другом устройстве они автоматически не синхронизируются, но можно перенести их через экспорт и импорт JSON. Очистка данных сайта или работа в приватном режиме может удалить сохранённое.</p></details>
     <details><summary>Учитываются ли региональные праздники и сменный график?</summary><p>Нет. Используется федеральный календарь России и обычные графики 5/2 либо 6/1. Для региональных нерабочих дней и индивидуальных смен результат может отличаться.</p></details>
    </div><p class="doc-footer-note">Если нужен быстрый расчёт, достаточно вкладки «Калькулятор». Остальные разделы помогают сравнить и выбрать подходящие даты.</p></section>
  </section>
- <footer class="foot">Источники календарей: <a id="calendar-source" href="https://www.consultant.ru/law/ref/calendar/proizvodstvennye/2027/" target="_blank" rel="noopener">КонсультантПлюс</a> · <a id="decree-source" href="https://www.consultant.ru/document/cons_doc_LAW_544706/" target="_blank" rel="noopener">Постановление о переносах</a>. Основа расчёта: ст. 120 и 139 ТК РФ. Расчёты приблизительные, до НДФЛ; без региональных праздников. Введённые зарплата и отпуска сохраняются только в браузере и не передаются поставщику календаря; при обновлении запрашиваются лишь общие календарные данные.</footer>
+ <footer class="foot">Источники календарей: <a id="calendar-source" href="https://www.consultant.ru/law/ref/calendar/proizvodstvennye/2027/" target="_blank" rel="noopener">КонсультантПлюс</a> · <a id="decree-source" href="https://www.consultant.ru/document/cons_doc_LAW_544706/" target="_blank" rel="noopener">Постановление о переносах</a>. Основа расчёта: ст. 120 и 139 ТК РФ. Расчёты приблизительные, в выбранном формате зарплаты (на руки / до НДФЛ); без региональных праздников. Введённые зарплата и отпуска сохраняются только в браузере и не передаются поставщику календаря; при обновлении запрашиваются лишь общие календарные данные.</footer>
 </div>
 <script>(()=>{'use strict';
 const D=86400000, KEY='vacation-plus-v2', FED=['01-01','01-02','01-03','01-04','01-05','01-06','01-07','01-08','02-23','03-08','05-01','05-09','06-12','11-04'];
@@ -199,10 +205,11 @@ const baseCalendars={
   2026:{source:'Встроенный · КонсультантПлюс',verified:true,decree:'№ 1466 от 24.09.2025',decreeUrl:'https://www.consultant.ru/document/cons_doc_LAW_515170/',transfers:[['2026-01-03','2026-01-09'],['2026-01-04','2026-12-31']],expected5:[15,19,21,22,19,21,23,21,22,22,20,22],expected6:[20,23,25,26,24,25,27,26,26,27,24,26]},
   2027:{source:'Встроенный · КонсультантПлюс',verified:true,decree:'№ 1187 от 17.09.2026',decreeUrl:'https://www.consultant.ru/document/cons_doc_LAW_544706/',transfers:[['2027-01-02','2027-11-05'],['2027-01-03','2027-12-31'],['2027-02-20','2027-02-22']],expected5:[15,19,22,22,19,21,22,22,22,21,20,22],expected6:[19,23,26,26,24,25,27,26,26,26,25,26]}
 };
-const initial={year:2027,salary:100000,base:28,additional:8,week:5,auto:true,hidden:[],years:{},periods:{},scenarios:{},lastCheck:0};
+const initial={year:2027,salary:100000,salaryMode:'net',base:28,additional:8,week:5,auto:true,hidden:[],years:{},periods:{},scenarios:{},lastCheck:0};
 function storeGet(){try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){return null}}
 const oldShare=(()=>{try{return JSON.parse(localStorage.getItem('vacation-calc-shared')||'null')}catch(e){return null}})();
 const raw=storeGet()||{};const state={...initial,...raw};
+if(state.salaryMode!=='gross')state.salaryMode='net'; // Backwards-compatible default for existing saved data.
 state.years={...baseCalendars,...(raw.years||{})};
 if(oldShare&&!(raw.salary>0)&&Number(oldShare.salary)>0)state.salary=Number(oldShare.salary);
 for(const y of [2026,2027]){if(!Array.isArray(state.periods[y])){let old=null;try{old=JSON.parse(localStorage.getItem(`vacation-calc-${y}`)||'null')}catch(e){}state.periods[y]=Array.isArray(old?.periods)?old.periods.map(p=>({...p,type:'auto'})):y===2027?[{start:'2027-07-05',end:'2027-07-18',type:'auto'}]:[{start:'2026-07-06',end:'2026-07-19',type:'auto'}]}}
@@ -260,8 +267,19 @@ function generateCandidates(n){const cacheKey=[state.year,state.week,Number(stat
  for(let t=Date.UTC(state.year,0,1);t<stop;t+=D){let e=t,k=0;while(e<stop&&k<n){if(!calendar.holiday(e))k++;if(k<n)e+=D}if(k<n)continue;const span={start:iso(t),end:iso(e),type:'auto'},r=compute([span],salary);if(r.error)continue;
  let a=t,b=e,adj=0;while(a-D>=Date.UTC(state.year,0,1)&&!calendar.work(a-D)){a-=D;adj++}while(b+D<stop&&!calendar.work(b+D)){b+=D;adj++}result.push({span,delta:r.delta,vacpay:r.vacpay,paid:r.paid,days:r.all,rest:(b-a)/D+1,bonus:r.holidays+adj,missed:r.missed,m:mon(t)});
  }allCandidates.set(cacheKey,result);return result}
-function weight(c,m){const scale=Math.max(1,state.salary/29.3),fin=c.delta/scale,bonus=c.bonus,rest=c.rest-c.paid;return m==='money'?fin+rest*.012:m==='rest'?rest*1.6+fin*.02:fin*.55+rest*.7}
-function topFor(n,m,count=3){const all=generateCandidates(n).slice().sort((a,b)=>weight(b,m)-weight(a,m)||a.span.start.localeCompare(b.span.start));const out=[];for(const c of all){if(out.some(x=>Math.abs(stamp(x.span.start)-stamp(c.span.start))/D<14))continue;out.push(c);if(out.length>=count)break}return out}
+function weight(c,m){const scale=Math.max(1,state.salary/29.3),fin=c.delta/scale,rest=c.rest-c.paid;return m==='money'?fin+rest*.012:rest*1.6+fin*.02}
+// Money and days off have different units. Compare both on a common 0..1 scale.
+function candidateLimits(all){let minMoney=Infinity,maxMoney=-Infinity,minRest=Infinity,maxRest=-Infinity;
+ for(const c of all){minMoney=Math.min(minMoney,c.delta);maxMoney=Math.max(maxMoney,c.delta);minRest=Math.min(minRest,c.bonus);maxRest=Math.max(maxRest,c.bonus)}
+ return {minMoney,maxMoney,minRest,maxRest};}
+function normalizedCandidate(c,lim){return {money:(c.delta-lim.minMoney)/Math.max(1,lim.maxMoney-lim.minMoney),rest:(c.bonus-lim.minRest)/Math.max(1,lim.maxRest-lim.minRest)}}
+function fairScore(moneyScore,restScore){return Math.min(moneyScore,restScore)-.04*Math.abs(moneyScore-restScore)}
+function topFor(n,m,count=3){const all=generateCandidates(n).slice(),lim=m==='balance'?candidateLimits(all):null;
+ all.sort((a,b)=>{
+  const sa=m==='balance'?normalizedCandidate(a,lim):null,sb=m==='balance'?normalizedCandidate(b,lim):null;
+  const scoreA=sa?fairScore(sa.money,sa.rest):weight(a,m),scoreB=sb?fairScore(sb.money,sb.rest):weight(b,m);
+  return scoreB-scoreA||a.span.start.localeCompare(b.span.start)});
+ const out=[];for(const c of all){if(out.some(x=>Math.abs(stamp(x.span.start)-stamp(c.span.start))/D<14))continue;out.push(c);if(out.length>=count)break}return out}
 function renderHeat(){setText('heat-title',`Тепловая карта — ${state.year}`);let candidates=generateCandidates(14),best=Array(12).fill(null);for(const c of candidates){const m=c.m;if(!best[m]||c.delta>best[m].delta)best[m]=c}const nums=best.filter(Boolean).map(x=>x.delta);let max=Math.max(1,...nums.map(x=>Math.abs(x)));
  $('heatmap').innerHTML=best.map((c,m)=>{const pct=c?Math.max(6,Math.abs(c.delta)/max*100):0;const hue=c&&c.delta>=0?'#61d7ad':'#ec8c94';return `<div class="heat" style="--heat:${hue}"><div class="h-title">${MONTHS[m]}</div><div class="h-delta ${c?(c.delta>=0?'good':'bad'):''}">${c?signed(c.delta):'—'}</div><div class="h-meta">${c?dateText(stamp(c.span.start))+' — '+dateText(stamp(c.span.end)):'Нет вариантов'}</div><div class="h-bar"><i style="width:${pct}%"></i></div></div>`}).join('')}
 function renderReco(){const explain={money:'Выбираем даты с наибольшей прибавкой к заработку.',rest:'Ищем максимальный непрерывный отдых за заданное число отпускных дней, присоединяя праздники и выходные.',balance:'Уравновешиваем прибавку к заработку и дополнительные дни отдыха.'};setText('reco-explain',explain[mode]);document.querySelectorAll('[data-mode]').forEach(x=>x.classList.toggle('active',x.dataset.mode===mode));const n=Number($('reco-days').value);suggestions=topFor(n,mode);
@@ -269,11 +287,64 @@ function renderReco(){const explain={money:'Выбираем даты с наи�
 function allocateLengths(total,n){if(total<14||!Number.isInteger(total)||n<1||n>8||total<14+(n-1))return null;const lens=[14],rest=total-14;for(let i=0;i<n-1;i++)lens.push(Math.floor(rest/(n-1))+(i<rest%(n-1)?1:0));return lens.sort((a,b)=>b-a)}
 function isSeparate(a,b){const s=stamp(a.span.start),e=stamp(a.span.end),s2=stamp(b.span.start),e2=stamp(b.span.end);return e+D*4<s2||e2+D*4<s}
 function makeYearPlan(type){const lengths=allocateLengths(budget(),Number($('plan-count').value));if(!lengths)return null;const chosen=[];for(const n of lengths){const all=generateCandidates(n).slice().sort((a,b)=>weight(b,type)-weight(a,type));const selected=all.find(x=>chosen.every(y=>isSeparate(x,y))&&chosen.every(y=>Math.abs(x.m-y.m)>=2||Math.abs(x.m-y.m)>=10))||all.find(x=>chosen.every(y=>isSeparate(x,y)));if(!selected)return null;chosen.push(selected)}chosen.sort((a,b)=>a.span.start.localeCompare(b.span.start));const spans=chosen.map(x=>({...x.span})),r=compute(spans);return r.error?null:{spans,r,rest:chosen.reduce((a,b)=>a+b.rest,0),bonus:chosen.reduce((a,b)=>a+b.bonus,0)}}
-function generatePlans(){const keys=['money','rest','balance'];annualPlans=keys.map(makeYearPlan);const names=['Максимум денег','Максимум отдыха','Баланс'];$('annual-plans').innerHTML=annualPlans.map((x,i)=>{if(!x)return `<div class="plan-box"><h3>${names[i]}</h3><p>Не удалось собрать план: проверь доступные дни и число отпусков.</p></div>`;return `<div class="plan-box"><h3>${names[i]}</h3><div class="money ${x.r.delta>=0?'good':'bad'}">${signed(x.r.delta)}</div><p>${x.r.paid} оплач. дн. · ${x.bonus} доп. дн. отдыха</p>${x.spans.map(s=>`<div class="plan-span"><b>${dateText(stamp(s.start))} — ${dateText(stamp(s.end))}</b>${compute([s]).paid} отпускных дней</div>`).join('')}<button type="button" class="btn btn-primary" data-plan="${i}">Применить план</button><button type="button" class="btn" data-plan-save="${i}">Сохранить в B</button></div>`}).join('');}
+// Generate a range of mixed strategies, then choose the fairest annual trade-off
+// relative to the actual money-first and rest-first plans, not fixed coefficients.
+function makeMixedYearPlan(moneyShare){
+ const lengths=allocateLengths(budget(),Number($('plan-count').value));if(!lengths)return null;
+ const chosen=[];
+ for(const n of lengths){
+  const all=generateCandidates(n),lim=candidateLimits(all);
+  const rated=all.map(c=>{const v=normalizedCandidate(c,lim);return {c,score:moneyShare*v.money+(1-moneyShare)*v.rest}})
+   .sort((a,b)=>b.score-a.score||a.c.span.start.localeCompare(b.c.span.start));
+  const canUse=x=>chosen.every(y=>isSeparate(x.c,y));
+  const selected=rated.find(x=>canUse(x)&&chosen.every(y=>Math.abs(x.c.m-y.m)>=2||Math.abs(x.c.m-y.m)>=10))||rated.find(canUse);
+  if(!selected)return null;chosen.push(selected.c);
+ }
+ chosen.sort((a,b)=>a.span.start.localeCompare(b.span.start));
+ const spans=chosen.map(x=>({...x.span})),r=compute(spans);
+ return r.error?null:{spans,r,rest:chosen.reduce((a,b)=>a+b.rest,0),bonus:chosen.reduce((a,b)=>a+b.bonus,0)};
+}
+function makeBalancedYearPlan(moneyPlan,restPlan){
+ if(!moneyPlan||!restPlan)return makeMixedYearPlan(.5);
+ const options=[];for(let i=0;i<=40;i++){const p=makeMixedYearPlan(i/40);if(p)options.push(p)}
+ if(!options.length)return null;
+ const minMoney=Math.min(moneyPlan.r.delta,restPlan.r.delta),maxMoney=Math.max(moneyPlan.r.delta,restPlan.r.delta);
+ const minRest=Math.min(moneyPlan.bonus,restPlan.bonus),maxRest=Math.max(moneyPlan.bonus,restPlan.bonus);
+ // Prefer genuine intermediate solutions whenever both objectives conflict.
+ const intermediate=options.filter(p=>p.r.delta>minMoney+1&&p.r.delta<maxMoney-1&&p.bonus>minRest&&p.bonus<maxRest);
+ const pool=intermediate.length?intermediate:options;
+ pool.sort((a,b)=>{
+  const score=p=>fairScore((p.r.delta-minMoney)/Math.max(1,maxMoney-minMoney),(p.bonus-minRest)/Math.max(1,maxRest-minRest));
+  return score(b)-score(a)||b.r.delta-a.r.delta;
+ });
+ return pool[0];
+}
+function generatePlans(){
+ const moneyPlan=makeYearPlan('money'),restPlan=makeYearPlan('rest');
+ annualPlans=[moneyPlan,restPlan,makeBalancedYearPlan(moneyPlan,restPlan)];
+ const names=['Максимум денег','Максимум отдыха','Баланс'];
+ $('annual-plans').innerHTML=annualPlans.map((x,i)=>{
+  if(!x)return `<div class="plan-box"><h3>${names[i]}</h3><p>Не удалось собрать план: проверь доступные дни и число отпусков.</p></div>`;
+  let explanation='';
+  if(i===2&&moneyPlan&&restPlan){
+   const extra=x.bonus-moneyPlan.bonus,gain=x.r.delta-restPlan.r.delta;
+   explanation=extra>0&&gain>0?`<p class="plan-tradeoff">Компромисс: на ${extra} доп. дн. отдыха больше, чем в денежном плане, и на ${money(gain)} выгоднее варианта максимального отдыха.</p>`:
+    '<p class="plan-tradeoff">Для этих условий отдельный промежуточный вариант может быть недоступен.</p>';
+  }
+  return `<div class="plan-box"><h3>${names[i]}</h3><div class="money ${x.r.delta>=0?'good':'bad'}">${signed(x.r.delta)}</div><p>${x.r.paid} оплач. дн. · ${x.bonus} доп. дн. отдыха</p>${explanation}${x.spans.map(s=>`<div class="plan-span"><b>${dateText(stamp(s.start))} — ${dateText(stamp(s.end))}</b>${compute([s]).paid} отпускных дней</div>`).join('')}<button type="button" class="btn btn-primary" data-plan="${i}">Применить план</button><button type="button" class="btn" data-plan-save="${i}">Сохранить в B</button></div>`
+ }).join('');
+}
 function setScenario(slot,spans){if(!state.scenarios[state.year])state.scenarios[state.year]={};state.scenarios[state.year][slot]=spans.map(x=>({...x}));persist();renderCompare()}
 function renderCompare(){const slots=state.scenarios[state.year]||{},plans=[['A',current()],['B',slots.B],['C',slots.C]];
  $('compare-grid').innerHTML=plans.map(([name,spans])=>{const ready=Array.isArray(spans),r=ready?compute(spans):null;return `<div class="compare-box"><h3>Сценарий ${name} ${name==='A'?'<span class="badge-sm">Текущий</span>':''}</h3>${ready&&!r.error?`<div class="money ${r.delta>=0?'good':'bad'}">${signed(r.delta)}</div><p>${r.paid} дн. отпуска · ${r.list.length} период(ов)</p><p>Отпускные: ${money(r.vacpay)}</p><p>Пропущено рабочих: ${r.missed}</p>`:`<div class="money">—</div><p>${r?.error||'Пока не сохранён'}</p>`}${name!=='A'?`<button class="btn" ${ready?'':'disabled'} data-load-scenario="${name}" type="button">Применить ${name}</button>`:'<p>Изменяется в калькуляторе</p>'}</div>`}).join('');let a=compute(current());let comparison=['B','C'].map(s=>{const p=slots[s];if(!p||a.error)return '';const b=compute(p);return b.error?'':`${s} относительно A: ${signed(b.delta-a.delta)}`}).filter(Boolean);setText('compare-diff',comparison.length?comparison.join('  ·  '):'Сохрани вариант в B или C, чтобы увидеть разницу с текущим планом.');}
-function renderSettings(){setText('planner-budget',budget()+' дней');$('salary').value=state.salary;$('leave-base').value=state.base;$('leave-additional').value=state.additional;$('auto-check').checked=state.auto;
+function renderSalaryMode(){
+ const net=state.salaryMode==='net';
+ document.querySelectorAll('[data-salary-mode]').forEach(b=>{const active=b.dataset.salaryMode===state.salaryMode;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))});
+ setText('salary-type-label',net?'на руки':'до НДФЛ');
+ setText('results-salary-type',net?'на руки (приблизительно)':'до НДФЛ');
+ setText('salary-hint',net?'Вводи сумму, которую получаешь на карту. Все итоговые суммы — ориентировочно «на руки»; отдельно НДФЛ не считаем.':'Вводи сумму до вычета налога. Все итоговые суммы будут до НДФЛ; налог отдельно не рассчитываем.');
+}
+function renderSettings(){renderSalaryMode();setText('planner-budget',budget()+' дней');$('salary').value=state.salary;$('leave-base').value=state.base;$('leave-additional').value=state.additional;$('auto-check').checked=state.auto;
  document.querySelectorAll('[data-week]').forEach(x=>x.classList.toggle('active',Number(x.dataset.week)===Number(state.week)));
  const ys=Object.keys(state.years).map(Number).sort((a,b)=>b-a);$('year-tiles').innerHTML=ys.map(y=>`<button class="year-tile ${state.hidden.includes(y)?'is-hidden':''} ${state.year===y?'current':''}" type="button" data-toggle-year="${y}"><div>${y} ${state.hidden.includes(y)?'＋':'✓'}</div><div class="tiny">${state.hidden.includes(y)?'Показать':'Скрыть'}</div></button>`).join('');$('last-check').textContent=state.lastCheck?'Последняя проверка: '+new Date(state.lastCheck).toLocaleDateString('ru-RU'):'Ещё не проверяли';}
 function renderYearSelect(){const ys=Object.keys(state.years).map(Number).filter(y=>!state.hidden.includes(y)).sort((a,b)=>b-a);$('year-select').innerHTML=ys.map(y=>`<option value="${y}" ${state.year===y?'selected':''}>${y}</option>`).join('')}
@@ -369,7 +440,8 @@ function validateImportedData(payload){
  if(!isObj(payload)||payload.app!=='vacation-plus'||payload.formatVersion!==1||!isObj(payload.data))fail('Файл не является резервной копией этого калькулятора.');
  const x=payload.data;
  if(!Number.isInteger(x.year)||x.year<2022||x.year>2035)fail('Недопустимый выбранный год.');
- if(!Number.isFinite(x.salary)||x.salary<=0||x.salary>1000000000)fail('Недопустимый оклад.');
+ if(!Number.isFinite(x.salary)||x.salary<=0||x.salary>1000000000)fail('Недопустимая зарплата.');
+ if(x.salaryMode!==undefined&&!['net','gross'].includes(x.salaryMode))fail('Некорректный способ указания зарплаты.');
  if(!Number.isInteger(x.base)||x.base<0||x.base>365||!Number.isInteger(x.additional)||x.additional<0||x.additional>365)fail('Недопустимое количество отпускных дней.');
  if(x.week!==5&&x.week!==6)fail('Неизвестный рабочий график.');
  if(typeof x.auto!=='boolean')fail('Некорректная настройка автообновления.');
@@ -416,7 +488,7 @@ function validateImportedData(payload){
   }
  }
  const lastCheck=Number.isFinite(x.lastCheck)&&x.lastCheck>=0&&x.lastCheck<Date.now()+86400000?x.lastCheck:0;
- return {year:x.year,salary:x.salary,base:x.base,additional:x.additional,week:x.week,auto:x.auto,hidden,years:allYears,periods,scenarios,lastCheck};
+ return {year:x.year,salary:x.salary,salaryMode:x.salaryMode||'net',base:x.base,additional:x.additional,week:x.week,auto:x.auto,hidden,years:allYears,periods,scenarios,lastCheck};
 }
 async function importLocalData(file){
  if(!file)return;
@@ -440,6 +512,7 @@ function resetLocalData(){
 $('year-select').addEventListener('change',e=>changeYear(Number(e.target.value)));
 document.querySelector('.tabs').addEventListener('click',e=>{const t=e.target.closest('[data-tab]');if(t)switchTab(t.dataset.tab)});
 $('salary').addEventListener('input',e=>{state.salary=Number(e.target.value);repaint()});
+document.querySelector('.salary-mode').addEventListener('click',e=>{const b=e.target.closest('[data-salary-mode]');if(!b||b.dataset.salaryMode===state.salaryMode)return;state.salaryMode=b.dataset.salaryMode;renderSalaryMode();persist()});
 $('periods').addEventListener('click',e=>{const b=e.target.closest('[data-remove]');if(!b)return;current().splice(Number(b.dataset.remove),1);renderInputs();repaint()});
 $('periods').addEventListener('change',e=>{const x=e.target.closest('[data-prop]');if(!x)return;const i=Number(x.dataset.index);if(!current()[i])return;current()[i][x.dataset.prop]=x.value;repaint()});
 $('add').addEventListener('click',()=>{if(current().length>=25)return;current().push({start:`${state.year}-08-02`,end:`${state.year}-08-15`,type:'auto'});renderInputs();repaint()});
