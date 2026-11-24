@@ -100,6 +100,9 @@ input,select{width:100%;border:1px solid #36445e;border-radius:12px;background:#
 @media(max-width:600px){.month-options{grid-template-columns:repeat(3,minmax(0,1fr))}.days button.day{font-size:10px}}
 .main{grid-template-columns:minmax(0,1fr)}.main>.panel,.sidebar,.sidebar>.panel{min-width:0}.pane-title{flex-wrap:wrap}.days button.day.vac{background:#4568d6;color:#fff}.days button.day.picked{background:#344d7b;color:#fff}.cal-shifts{font-size:12px;color:#b5c6e4;line-height:1.6;margin:8px 0 12px}
 @media(max-width:760px){.layout,.sidebar{grid-template-columns:minmax(0,1fr)}.cal-month{padding:7px}.cal-month h3{font-size:12px}.cal-month h3 span{font-size:10px}.cal-controls .reco-ctrl{flex-wrap:wrap}.input-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Embedded mode: the content must not depend on the iframe height. */
+html.vacation-embedded body{min-height:0}
 </style></head><body>
 <div class="container">
  <header class="head">
@@ -546,4 +549,34 @@ $('reset-data').addEventListener('click',resetLocalData);
 $('load-year-btn').addEventListener('click',async()=>{const y=Number($('load-year').value);$('load-year-btn').disabled=true;setFeedback(`Загружаем календарь ${y}…`);try{await retrieveYear(y)}catch(e){setFeedback(e.message,'err')}finally{$('load-year-btn').disabled=false}});
 loadCalendar();renderYearSelect();renderInputs();renderAll();persist();
 if(state.auto&&Date.now()-(Number(state.lastCheck)||0)>7*86400000){setTimeout(()=>checkUpdates(false),1200)}
-})();</script></body></html>
+})();</script>
+<script>
+/* Optional cross-origin iframe sizing. No user data is sent. */
+(()=>{'use strict';
+ if(window.parent===window)return;
+ document.documentElement.classList.add('vacation-embedded');
+ const content=document.querySelector('.container');
+ if(!content)return;
+ let parentOrigin=null,lastHeight=0,scheduled=false;
+ function sendHeight(){
+   scheduled=false;
+   if(!parentOrigin)return;
+   const height=Math.ceil(content.getBoundingClientRect().height);
+   if(height<=0||height===lastHeight)return;
+   lastHeight=height;
+   window.parent.postMessage({type:'vacation-resize',height},parentOrigin);
+ }
+ function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(sendHeight)}}
+ window.addEventListener('message',event=>{
+   if(event.source!==window.parent||event.data?.type!=='vacation-resize-request')return;
+   if(!/^https?:\/\//.test(event.origin))return;
+   parentOrigin=event.origin;lastHeight=0;schedule();
+ });
+ if(typeof ResizeObserver==='function')new ResizeObserver(schedule).observe(content);
+ else new MutationObserver(schedule).observe(content,{subtree:true,childList:true,attributes:true,characterData:true});
+ window.addEventListener('resize',schedule);
+ window.addEventListener('load',schedule);
+ if(document.fonts)document.fonts.ready.then(schedule);
+})();
+</script>
+</body></html>
