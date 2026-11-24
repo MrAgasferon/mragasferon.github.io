@@ -227,10 +227,10 @@ const oldShare=(()=>{try{return JSON.parse(localStorage.getItem('vacation-calc-s
 const raw=storeGet()||{};const state={...initial,...raw};
 if(state.salaryMode!=='gross')state.salaryMode='net'; // Backwards-compatible default for existing saved data.
 if(typeof state.autoHolidays!=='boolean')state.autoHolidays=false;
-state.years={...baseCalendars,...(raw.years||{})};
+state.years={...(raw.years||{}),...baseCalendars};
 if(oldShare&&!(raw.salary>0)&&Number(oldShare.salary)>0)state.salary=Number(oldShare.salary);
 for(const y of [2026,2027]){if(!Array.isArray(state.periods[y])){let old=null;try{old=JSON.parse(localStorage.getItem(`vacation-calc-${y}`)||'null')}catch(e){}state.periods[y]=Array.isArray(old?.periods)?old.periods.map(p=>({...p,type:'auto'})):y===2027?[{start:'2027-07-05',end:'2027-07-18',type:'auto'}]:[{start:'2026-07-06',end:'2026-07-19',type:'auto'}]}}
-state.hidden=Array.isArray(state.hidden)?state.hidden:[];state.scenarios=state.scenarios||{};if(!state.years[state.year]||state.hidden.includes(state.year))state.year=2027;
+state.hidden=Array.isArray(state.hidden)?state.hidden:[];state.scenarios=state.scenarios||{};if(!state.years[state.year]||state.hidden.includes(state.year)){state.year=2027;state.hidden=state.hidden.filter(y=>y!==2027)}
 function normalizePrefs(x){return {count:[2,3,4].includes(x?.count)?x.count:3,gap:Number.isInteger(x?.gap)&&x.gap>=0&&x.gap<=365?x.gap:4,min14:x?.min14!==false,months:Array.from({length:12},(_,i)=>['prefer','exclude'].includes(x?.months?.[i])?x.months[i]:'any')}}
 function migrateSpan(p,auto=state.autoHolidays){if(p.inputMode==='days'||p.inputMode==='dates')return p;return {...p,inputMode:!p.fixedDates&&auto?'days':'dates',...(!p.fixedDates&&auto?{duration:Math.max(1,Math.round((stamp(p.end)-stamp(p.start))/D)+1)}:{})}}
 for(const [y,arr] of Object.entries(state.periods))if(Array.isArray(arr))state.periods[y]=arr.map(p=>migrateSpan(p));
@@ -243,12 +243,12 @@ let mode='money' , suggestions=[], annualPlans=[];let calendar=null,counts=[],al
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){setFeedback('Хранилище браузера переполнено или недоступно. Изменения могут не сохраниться.','err')}}
 function datesOfYear(y){let list=[];for(let t=Date.UTC(y,0,1),end=Date.UTC(y+1,0,1);t<end;t+=D)list.push(t);return list}
 function getCalendar(y,week){const c=state.years[y];if(!c)throw Error('Нет календаря на '+y);
- const h=new Set(FED.map(x=>y+'-'+x)),gov5=new Set(),gov6=new Set(),work5=new Set();
- for(const [src,dst] of c.transfers||[]){if(!src.startsWith(y+'-')||!dst.startsWith(y+'-'))continue;const v=stamp(src);if(!Number.isFinite(v))continue;gov5.add(dst);if(new Date(v).getUTCDay()===0)gov6.add(dst);if(!h.has(src)&&new Date(v).getUTCDay()===6)work5.add(src)}
+ const h=new Set(FED.map(x=>y+'-'+x)),gov5=new Set(),gov6=new Set(),work5=new Set(),sources5=new Set(),sources6=new Set();
+ for(const [src,dst] of c.transfers||[]){if(!src.startsWith(y+'-')||!dst.startsWith(y+'-'))continue;const v=stamp(src);if(!Number.isFinite(v))continue;gov5.add(dst);sources5.add(src);if(new Date(v).getUTCDay()===0){gov6.add(dst);sources6.add(src)}if(!h.has(src)&&new Date(v).getUTCDay()===6)work5.add(src)}
  // Article 112: a Sunday/Saturday public holiday outside 1–8 January moves the day off.
  const automatic=new Set(),basicWeekend=t=>{const d=new Date(t).getUTCDay();return d===0||(week===5&&d===6)};
  const govt=week===5?gov5:gov6;
- for(const x of FED){const d=stamp(y+'-'+x);if(x.startsWith('01-')||!basicWeekend(d))continue;let t=d+D;for(let i=0;i<20;i++,t+=D){const k=iso(t);if(!basicWeekend(t)&&!h.has(k)&&!govt.has(k)&&!automatic.has(k)){automatic.add(k);break}}}
+ for(const x of FED){const d=stamp(y+'-'+x);if(x.startsWith('01-')||!basicWeekend(d)||(week===5?sources5:sources6).has(iso(d)))continue;let t=d+D;for(let i=0;i<20;i++,t+=D){const k=iso(t);if(!basicWeekend(t)&&!h.has(k)&&!govt.has(k)&&!automatic.has(k)){automatic.add(k);break}}}
  const extra=new Set([...govt,...automatic]);
  const work=t=>{const k=iso(t),w=new Date(t).getUTCDay();if(h.has(k)||extra.has(k))return false;if(week===5)return work5.has(k)||(w>0&&w<6);return w!==0};
  const monthly=Array.from({length:12},()=>0);for(const t of datesOfYear(y))if(work(t))monthly[mon(t)]++;
@@ -315,6 +315,8 @@ function explanation(r,bonus,reference){const monthly=r.items.map(x=>`${MONTHS[x
 function syncPriority(){for(const id of ['reco','plan']){$(id+'-priority').value=state.priority;setText(id+'-priority-label',`${100-state.priority}% деньги / ${state.priority}% отдых`)}}
 function topFor(n,m,count=3){const all=generateCandidates(n).slice(),lim=m==='balance'?candidateLimits(all):null;
  all.sort((a,b)=>{
+  if(m==='money'||m==='balance'&&state.priority===0)return b.delta-a.delta||b.bonus-a.bonus||a.span.start.localeCompare(b.span.start);
+  if(m==='rest'||m==='balance'&&state.priority===100)return b.bonus-a.bonus||b.delta-a.delta||a.span.start.localeCompare(b.span.start);
   const sa=m==='balance'?normalizedCandidate(a,lim):null,sb=m==='balance'?normalizedCandidate(b,lim):null;
   const scoreA=sa?fairScore(sa.money,sa.rest):weight(a,m),scoreB=sb?fairScore(sb.money,sb.rest):weight(b,m);
   return scoreB-scoreA||a.span.start.localeCompare(b.span.start)});
@@ -328,14 +330,50 @@ function spanBounds(p){const z=resolvePeriod(p);return z.error?null:{s:z.s,e:z.e
 function separate(a,b,gap){return a.e+D*(gap+1)<=b.s||b.e+D*(gap+1)<=a.s}
 function restStats(spans,r){const days=new Set(),start=Date.UTC(state.year,0,1),stop=Date.UTC(state.year+1,0,1);for(const p of spans){let {s,e}=spanBounds(p);while(s-D>=start&&!calendar.work(s-D))s-=D;while(e+D<stop&&!calendar.work(e+D))e+=D;for(let t=s;t<=e;t+=D)days.add(t)}return {rest:days.size,bonus:days.size-r.paid}}
 function plannerContext(){const cfg=prefs(),locked=current().filter(p=>p.locked).map(p=>({...p})),r=compute(locked);if(r.error)return {error:'Закреплённые отпуска: '+r.error};if(r.main>state.base||r.extra>state.additional||r.paid>budget())return {error:'Закреплённые отпуска превышают доступный остаток.'};if(locked.length>cfg.count)return {error:'Закреплено больше отпусков, чем выбрано в плане.'};if(r.list.some(x=>!x.paid))return {error:'Закреплённый период не содержит оплачиваемых дней.'};const fixed=locked.map(spanBounds);if(fixed.some((a,i)=>fixed.slice(i+1).some(b=>!separate(a,b,cfg.gap))))return {error:'Закреплённые отпуска нарушают минимальный промежуток.'};const require14=cfg.min14&&!r.list.some(x=>x.paid>=14),lengths=allocateLengths(budget()-r.paid,cfg.count-locked.length,require14);if(!lengths||require14&&!lengths.some(n=>n>=14))return {error:'Недостаточно дней или свободных периодов для выбранных условий.'};const start=Date.UTC(state.year,0,1),days=daysIn(state.year),groups=lengths.map(n=>{const available=generateCandidates(n).filter(c=>{const a=spanBounds(c.span);if(!fixed.every(b=>separate(a,b,cfg.gap)))return false;for(let t=a.s;t<=a.e;t+=D)if(cfg.months[mon(t)]==='exclude')return false;return true});const lim=candidateLimits(available),byDay=new Map();for(const c of available){const v=normalizedCandidate(c,lim),a=spanBounds(c.span),i=(a.s-start)/D,j=(a.e-start)/D;byDay.set(i,{c,money:v.money,rest:v.rest,end:j,prefer:cfg.months[c.m]==='prefer'?1:0})}return {byDay}});if(groups.some(g=>!g.byDay.size))return {error:'Нет доступных дат для одного из отпусков. Ослабь ограничения.'};return {cfg,locked,lengths,groups,days}}
-// Interval scheduling with a bitmask: searches all non-overlapping placements for the chosen lengths.
-function solvePlan(ctx,q){const {groups,days,cfg,locked}=ctx,n=groups.length,full=(1<<n)-1,stride=days+1,dp=new Float64Array((full+1)*stride),choice=new Int8Array((full+1)*stride);dp.fill(-Infinity);for(let d=0;d<=days;d++)dp[full*stride+d]=0;
- for(let mask=full-1;mask>=0;mask--){for(let d=days-1;d>=0;d--){const idx=mask*stride+d;let best=dp[idx+1],pick=0;for(let j=0;j<n;j++){if(mask&(1<<j))continue;const x=groups[j].byDay.get(d);if(!x)continue;const next=Math.min(days,x.end+cfg.gap+1),tail=dp[(mask|(1<<j))*stride+next];if(!Number.isFinite(tail))continue;const c=x.c,scale=Math.max(1,state.salary/29.3);let v=q===0?c.delta/scale+c.bonus*1e-7:q===1?c.bonus+c.delta/scale*1e-7:(1-q)*x.money+q*x.rest;v+=x.prefer*(q===0||q===1?1e-6:.015);const score=v+tail;if(score>best+1e-10){best=score;pick=j+1}}dp[idx]=best;choice[idx]=pick}}
- if(!Number.isFinite(dp[0]))return null;let d=0,mask=0;const spans=locked.map(p=>({...p}));while(mask!==full&&d<days){const j=choice[mask*stride+d]-1;if(j<0){d++;continue}const x=groups[j].byDay.get(d);spans.push({...x.c.span});mask|=1<<j;d=Math.min(days,x.end+cfg.gap+1)}if(mask!==full)return null;spans.sort((a,b)=>a.start.localeCompare(b.start));const r=compute(spans);if(r.error||r.paid!==budget()||r.main>state.base||r.extra>state.additional)return null;return {spans,r,...restStats(spans,r)}}
+// Exact date search for the chosen lengths. Count the union of extended rest
+// intervals, excluding days already covered by locked periods.
+function solvePlan(ctx,q){
+ const {groups,days,cfg,locked}=ctx,n=groups.length,full=(1<<n)-1,stride=days+1;
+ const start=Date.UTC(state.year,0,1),left=new Int16Array(days),right=new Int16Array(days),fixed=new Uint8Array(days),pref=new Int16Array(days+1);
+ for(let d=0;d<days;d++)left[d]=d>0&&!calendar.work(start+(d-1)*D)?left[d-1]:d;
+ for(let d=days-1;d>=0;d--)right[d]=d+1<days&&!calendar.work(start+(d+1)*D)?right[d+1]:d;
+ for(const p of locked){const z=spanBounds(p);for(let d=left[(z.s-start)/D];d<=right[(z.e-start)/D];d++)fixed[d]=1}
+ for(let d=0;d<days;d++)pref[d+1]=pref[d]+(1-fixed[d]);
+ const coverage=(a,b)=>b<a?0:pref[b+1]-pref[a],scale=Math.max(1e-9,Number(state.salary)/29.3);
+ const maxRest=Math.max(1,...groups.map(g=>Math.max(...Array.from(g.byDay.values(),x=>x.c.bonus))))*Math.max(1,n);
+ const moneyRange=Math.max(1,groups.reduce((sum,g)=>{const v=Array.from(g.byDay.values(),x=>x.c.delta/scale);return sum+Math.max(...v)-Math.min(...v)},0));
+ const primary=new Float64Array((full+1)*stride),secondary=new Float64Array(primary.length),preference=new Int16Array(primary.length),prev=new Int16Array(primary.length),chosen=new Int16Array(primary.length),group=new Int8Array(primary.length);
+ primary.fill(-Infinity);primary[0]=0;prev.fill(-1);
+ const better=(a,b,c,x,y,z)=>a>x+1e-9||(Math.abs(a-x)<=1e-9&&(b>y+1e-9||(Math.abs(b-y)<=1e-9&&c>z)));
+ for(let mask=0;mask<full;mask++){
+  const off=mask*stride, bestPrefix=new Int16Array(stride);let best=-1;
+  for(let k=0;k<stride;k++){const i=off+k;if(Number.isFinite(primary[i])&&(best<0||better(primary[i],secondary[i],preference[i],primary[off+best],secondary[off+best],preference[off+best])))best=k;bestPrefix[k]=best}
+  if(best<0)continue;
+  for(let j=0;j<n;j++){if(mask&(1<<j))continue;const dst=(mask|(1<<j))*stride;
+   for(const [d,x] of groups[j].byDay){const a=left[d],b=right[x.end],maxPrev=Math.max(0,d-cfg.gap),fin=x.c.delta/scale;
+    // k=previous last date+1; k=0 is the empty plan. Prefix max handles
+    // all earlier disjoint rest intervals; only nearby overlapping ones need individual checks.
+    let split=maxPrev;while(split>0&&right[split-1]>=a)split--;
+    const consider=k=>{if(k<0)return;const i=off+k;if(!Number.isFinite(primary[i]))return;
+     const overlap=k===0?0:coverage(a,Math.min(b,right[k-1]));
+     const rest=coverage(a,b)-overlap, v=q===0?fin:q===1?rest:(1-q)*fin/moneyRange+q*rest/maxRest;
+     const t=q===0?rest:fin, p=preference[i]+x.prefer, target=dst+x.end+1;
+     // Preferred months break exact ties at the extremes; mildly bias intermediate search.
+     const value=primary[i]+v+(q>0&&q<1?x.prefer*.005:0), tie=secondary[i]+t;
+     if(better(value,tie,p,primary[target],secondary[target],preference[target])){primary[target]=value;secondary[target]=tie;preference[target]=p;prev[target]=k;chosen[target]=d;group[target]=j}
+    };
+    consider(bestPrefix[split]);for(let k=split+1;k<=maxPrev;k++)consider(k);
+   }
+  }
+ }
+ let k=-1;const off=full*stride;for(let i=0;i<stride;i++)if(Number.isFinite(primary[off+i])&&(k<0||better(primary[off+i],secondary[off+i],preference[off+i],primary[off+k],secondary[off+k],preference[off+k])))k=i;
+ if(k<0)return null;let mask=full;const spans=locked.map(p=>({...p}));while(mask){const i=mask*stride+k,j=group[i],x=groups[j].byDay.get(chosen[i]);if(!x||prev[i]<0)return null;spans.push({...x.c.span});k=prev[i];mask^=1<<j}
+ spans.sort((a,b)=>a.start.localeCompare(b.start));const r=compute(spans);if(r.error||r.paid!==budget()||r.main>state.base||r.extra>state.additional)return null;return {spans,r,...restStats(spans,r)};
+}
 function collectPlans(){const ctx=plannerContext();if(ctx.error)return {error:ctx.error};const uniq=new Map();for(let i=0;i<=40;i++){const p=solvePlan(ctx,i/40);if(p)uniq.set(p.spans.map(s=>s.start+':'+resolvePeriod(s).e).join('|'),p)}const pool=[...uniq.values()];if(!pool.length)return {error:'Не удалось разместить отпуска с такими ограничениями. Попробуй уменьшить промежуток или число исключённых месяцев.'};const moneyPlan=pool.slice().sort((a,b)=>b.r.delta-a.r.delta||b.bonus-a.bonus)[0],restPlan=pool.slice().sort((a,b)=>b.bonus-a.bonus||b.r.delta-a.r.delta)[0];return {pool,moneyPlan,restPlan}}
 function pickBalance(pool,moneyPlan,restPlan){if(state.priority===0)return moneyPlan;if(state.priority===100)return restPlan;const minM=restPlan.r.delta,maxM=moneyPlan.r.delta,minR=moneyPlan.bonus,maxR=restPlan.bonus;const score=p=>fairScore(maxM===minM?1:(p.r.delta-minM)/(maxM-minM),maxR===minR?1:(p.bonus-minR)/(maxR-minR))+.005*p.spans.filter(s=>!s.locked&&prefs().months[mon(stamp(s.start))]==='prefer').length;return pool.slice().sort((a,b)=>score(b)-score(a)||b.r.delta-a.r.delta)[0]}
 function renderPlannerControls(){const cfg=prefs();$('plan-count').value=cfg.count;$('plan-gap').value=cfg.gap;$('plan-min14').checked=cfg.min14;$('plan-months').innerHTML=MONTHS.map((m,i)=>`<div><label for="plan-m-${i}">${m}</label><select id="plan-m-${i}" data-plan-month="${i}"><option value="any" ${cfg.months[i]==='any'?'selected':''}>Любой</option><option value="prefer" ${cfg.months[i]==='prefer'?'selected':''}>Желателен</option><option value="exclude" ${cfg.months[i]==='exclude'?'selected':''}>Исключён</option></select></div>`).join('');const locked=current().filter(p=>p.locked),r=compute(locked);setText('plan-lock-info',`Закреплено: ${locked.length} · ${r.error?'проверь даты':r.paid+' отпускных дней'}. Закрепляй согласованные периоды в калькуляторе. Они остаются неизменными, даже если месяц исключён.`);syncPriority()}
-function generatePlans(reuse=false){if(reuse!==true||!lastPlanPool)lastPlanPool=collectPlans();const result=lastPlanPool;syncPriority();if(result.error){annualPlans=[];setText('plan-feedback',result.error);$('annual-plans').innerHTML='';return}setText('plan-feedback','Поиск по допустимым датам для выбранного распределения длительностей. Согласованные отпуска сохранены.');const {pool,moneyPlan,restPlan}=result;annualPlans=[moneyPlan,restPlan,pickBalance(pool,moneyPlan,restPlan)];const names=['Максимум денег','Максимум отдыха','Баланс'];$('annual-plans').innerHTML=annualPlans.map((x,i)=>{const diff=x.bonus-moneyPlan.bonus,cost=moneyPlan.r.delta-x.r.delta;const desc=i===2?`<p class="plan-tradeoff">${diff>0?`Доп. отдых: +${diff} дн. относительно денежного плана. Цена: ${money(cost)}.`: 'Дополнительного отдыха относительно денежного плана нет.'}${x===moneyPlan||x===restPlan?' Для выбранного приоритета подходит крайний вариант.':''}</p>`:'';return `<div class="plan-box"><h3>${names[i]}</h3><div class="money ${x.r.delta>=0?'good':'bad'}">${signed(x.r.delta)}</div><p>${x.r.paid} оплач. дн. · ${x.bonus} доп. дн. отдыха</p>${desc}${x.r.list.map(s=>`<div class="plan-span"><b>${dateText(stamp(s.start))} — ${dateText(stamp(s.effectiveEnd))}${s.locked?' · закреплён':''}</b>${s.paid} отпускных дней</div>`).join('')}${explanation(x.r,x.bonus,{delta:moneyPlan.r.delta,bonus:moneyPlan.bonus})}<button type="button" class="btn btn-primary" data-plan="${i}">Применить план</button><button type="button" class="btn" data-plan-save="${i}">Сохранить в B</button></div>`}).join('')}
+function generatePlans(reuse=false){if(reuse!==true||!lastPlanPool)lastPlanPool=collectPlans();const result=lastPlanPool;syncPriority();if(result.error){annualPlans=[];setText('plan-feedback',result.error);$('annual-plans').innerHTML='';return}setText('plan-feedback','Поиск по допустимым датам для выбранных длительностей. Дополнительный отдых считается без повторов. Баланс — подбор из найденных вариантов; согласованные отпуска сохранены.');const {pool,moneyPlan,restPlan}=result;annualPlans=[moneyPlan,restPlan,pickBalance(pool,moneyPlan,restPlan)];const names=['Максимум денег','Максимум отдыха','Баланс'];$('annual-plans').innerHTML=annualPlans.map((x,i)=>{const diff=x.bonus-moneyPlan.bonus,cost=moneyPlan.r.delta-x.r.delta;const desc=i===2?`<p class="plan-tradeoff">${diff>0?`Доп. отдых: +${diff} дн. относительно денежного плана. Цена: ${money(cost)}.`: 'Дополнительного отдыха относительно денежного плана нет.'}${x===moneyPlan||x===restPlan?' Для выбранного приоритета подходит крайний вариант.':''}</p>`:'';return `<div class="plan-box"><h3>${names[i]}</h3><div class="money ${x.r.delta>=0?'good':'bad'}">${signed(x.r.delta)}</div><p>${x.r.paid} оплач. дн. · ${x.bonus} доп. дн. отдыха</p>${desc}${x.r.list.map(s=>`<div class="plan-span"><b>${dateText(stamp(s.start))} — ${dateText(stamp(s.effectiveEnd))}${s.locked?' · закреплён':''}</b>${s.paid} отпускных дней</div>`).join('')}${explanation(x.r,x.bonus,{delta:moneyPlan.r.delta,bonus:moneyPlan.bonus})}<button type="button" class="btn btn-primary" data-plan="${i}">Применить план</button><button type="button" class="btn" data-plan-save="${i}">Сохранить в B</button></div>`}).join('')}
 
 function setScenario(slot,spans){if(!state.scenarios[state.year])state.scenarios[state.year]={};state.scenarios[state.year][slot]=spans.map(x=>({...x}));persist();renderCompare()}
 function renderCompare(){const slots=state.scenarios[state.year]||{},plans=[['A',current()],['B',slots.B],['C',slots.C]];
@@ -362,7 +400,8 @@ function normalizedRemote(y,json){if(!json||Number(json.year)!==y||!Array.isArra
  const transfers=json.transferredHolidays.map(x=>[plainISO(x.from),plainISO(x)]).filter(([from,to])=>Number.isFinite(stamp(from,y))&&Number.isFinite(stamp(to,y)));
  // Require all government / statutory transfers to carry a verified source date.
  if(transfers.length!==json.transferredHolidays.length)throw Error('Не все переносы имеют исходную дату.');
- const hCount=json.holidays.filter(x=>Number.isFinite(stamp(plainISO(x),y))).length;if(hCount<10)throw Error('В ответе недостаточно праздничных дней.');
+ const holidays=json.holidays.map(plainISO);if(holidays.length!==FED.length||new Set(holidays).size!==FED.length||FED.some(x=>!holidays.includes(y+'-'+x)))throw Error('Список федеральных праздников отличается от ожидаемого.');
+ if(new Set(transfers.map(x=>x[0])).size!==transfers.length||new Set(transfers.map(x=>x[1])).size!==transfers.length||transfers.some(([a,b])=>a===b))throw Error('В ответе повторяются или совпадают даты переносов.');
  const obj={verified:true,source:'Calendar API',decree:`№ ${num} от ${d.split('-').reverse().join('.')}`,decreeUrl:url,transfers};
  const test5=getCalendarFrom(y,5,obj),test6=getCalendarFrom(y,6,obj);const total5=test5.monthly.reduce((a,b)=>a+b,0),total6=test6.monthly.reduce((a,b)=>a+b,0);
  if(total5<225||total5>260||total6<275||total6>310)throw Error('Неправдоподобные нормы рабочих дней.');
