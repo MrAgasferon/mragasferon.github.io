@@ -1,6 +1,6 @@
 /* =============================================================================
  * CASINO for Lampa — слоты · европейская рулетка · видеопокер Jacks or Better
- * v1.3.0 · ES5 · без зависимостей · виртуальные фишки · управление пультом
+ * v1.4.0-beta.1 · ES5 · без зависимостей · виртуальные фишки · управление пультом
  *
  * НОВОЕ
  *  - Видеопокер «Jacks or Better»: колода 52, HOLD по OK, обмен, таблица 9/6
@@ -13,7 +13,7 @@
  * УСТАНОВКА С GITHUB
  *   Lampa → Настройки → Плагины → Добавить плагин → URL:
  *     GitHub Pages : https://USER.github.io/REPO/casino/casino.js?v=5
- *     jsDelivr CDN : https://cdn.jsdelivr.net/gh/USER/REPO@v1.3.0/casino/casino.js
+ *     jsDelivr CDN : https://cdn.jsdelivr.net/gh/USER/REPO@v1.4.0-beta.1/casino/casino.js
  *   raw.githubusercontent.com не подходит (text/plain + nosniff).
  *
  * ПУЛЬТ: ←/→ выбор в ряду · ↑/↓ между рядами · OK действие · BACK выход
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
     if (window.plugin_vcasino) return;
-    window.plugin_vcasino = true;
+    // Mark loaded only after registration succeeds.
 
     /* ---------------------------------------------------------------- utils */
     var RAF = window.requestAnimationFrame || window.webkitRequestAnimationFrame ||
@@ -48,9 +48,10 @@
         if (v === null || typeof v === 'undefined' || v === '') return def;
         return v === true || v === 'true';
     }
-    var CFG = { sound: cfgRead('sound', true), turbo: cfgRead('turbo', false), fx: cfgRead('fx', true) };
+    function choice(key, options, fallback) { var v = Lampa.Storage.get('vc_' + key, fallback); return options.indexOf(v) >= 0 ? v : fallback; }
+    var CFG = { layout: choice('layout', ['auto','tv','desktop','mobile'], 'auto'), quality: choice('quality', ['low','balanced','high'], 'balanced'), sound: cfgRead('sound', true), turbo: cfgRead('turbo', false), fx: cfgRead('fx', true) };
     function cfgSet(name, val) { CFG[name] = val; Lampa.Storage.set('vc_' + name, val); }
-    function cfgRefresh() { CFG.sound = cfgRead('sound', true); CFG.turbo = cfgRead('turbo', false); CFG.fx = cfgRead('fx', true); }
+    function cfgRefresh() { CFG.layout = choice('layout', ['auto','tv','desktop','mobile'], 'auto'); CFG.quality = choice('quality', ['low','balanced','high'], 'balanced'); CFG.sound = cfgRead('sound', true); CFG.turbo = cfgRead('turbo', false); CFG.fx = cfgRead('fx', true); }
 
     /* ---------------------------------------------------------------- state */
     var KEY = 'vcasino';
@@ -60,7 +61,7 @@
     var COINS = [5, 10, 25, 50, 100];
 
     function fresh() {
-        return { bank: 2500, start: 2500, xp: 0, level: 1, jackpot: 25000,
+        return { schema: 2, pending: null, escrow: 0, free: {left:0,total:0,bet:0}, stats: {s:{b:0,w:0,n:0},r:{b:0,w:0,n:0},p:{b:0,w:0,n:0}}, bonuses: 0, bank: 2500, start: 2500, xp: 0, level: 1, jackpot: 25000,
                  wagered: 0, returned: 0, best: 0, spins: 0, rspin: 0, pkn: 0,
                  day: '', rescue: 0, hist: [], nums: [], last: null,
                  betIdx: 2, chipIdx: 1, coinIdx: 2, coins: 5, game: 'slots' };
@@ -68,9 +69,11 @@
     var S = fresh();
     (function load() {
         var d = Lampa.Storage.get(KEY, null), f = fresh(), k;
+        if (d && typeof d === 'object' && !d.schema && !Lampa.Storage.get('vcasino_v130_backup',null)) Lampa.Storage.set('vcasino_v130_backup',JSON.parse(JSON.stringify(d)));
         if (d && typeof d === 'object') { for (k in f) if (typeof d[k] !== 'undefined') f[k] = d[k]; S = f; }
         S.bank = Math.max(0, parseInt(S.bank, 10) || 0);
-        S.jackpot = Math.max(25000, parseInt(S.jackpot, 10) || 25000);
+        S.jackpot = Math.max(25000, Number(S.jackpot) || 25000);
+        normalizeState();
         S.betIdx = clamp(S.betIdx | 0, 0, LINE_BETS.length - 1);
         S.chipIdx = clamp(S.chipIdx | 0, 0, CHIPS.length - 1);
         S.coinIdx = clamp(S.coinIdx | 0, 0, COINS.length - 1);
@@ -79,7 +82,58 @@
         if (!(S.nums instanceof Array)) S.nums = [];
         if (S.game !== 'slots' && S.game !== 'roulette' && S.game !== 'poker') S.game = 'slots';
     })();
-    function save() { Lampa.Storage.set(KEY, S); }
+    function finite(v, d) { v = Number(v); return isFinite(v) && v >= 0 && v <= 9007199254740991 ? v : d; }
+    function normalizeState() {
+        var f = fresh(), k, g, i, h = [], n = [], old = S.stats;
+        ['bank','start','xp','level','jackpot','wagered','returned','best','spins','rspin','pkn','rescue','escrow','bonuses'].forEach(function(k){ S[k] = finite(S[k], f[k]); });
+        S.level = Math.max(1, Math.min(100000, Math.floor(S.level))); S.xp = Math.min(S.xp, 26000400);
+        S.schema = 2; S.stats = f.stats;
+        for (g in S.stats) if (old && old[g]) for (k in S.stats[g]) S.stats[g][k] = finite(old[g][k], 0);
+        if (S.hist instanceof Array) for(i=0;i<Math.min(14,S.hist.length);i++){ var e=S.hist[i]; if(e && typeof e.l==='string') h.push({g:String(e.g),l:e.l.slice(0,100),b:finite(e.b,0),w:finite(e.w,0)}); }
+        if (S.nums instanceof Array) for(i=0;i<Math.min(9,S.nums.length);i++) if(typeof S.nums[i]==='number' && S.nums[i]>=0 && S.nums[i]<=36 && S.nums[i]%1===0) n.push(S.nums[i]);
+        S.hist=h; S.nums=n; S.day=typeof S.day==='string'?S.day:'';
+        var fr=S.free || {}; S.free={left:Math.floor(finite(fr.left,0)),total:Math.floor(finite(fr.total,0)),bet:finite(fr.bet,0)};
+        if (LINE_BETS.indexOf(S.free.bet/5)<0 || !S.free.left) S.free=f.free;
+        if (!S.last || typeof S.last!=='object') S.last=null;
+        else { var clean={}; for(k in S.last) if(Object.prototype.hasOwnProperty.call(S.last,k) && /^(n([0-9]|[12][0-9]|3[0-6])|red|black|even|odd|low|high|d[123]|c[123])$/.test(k) && S.last[k]) { var b=finite(S.last[k].sum,0); if(b>0) clean[k]={sum:b,list:[b]}; } S.last=clean; }
+    }
+    function escapeHTML(v) { return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function record(g, label, b, w) {
+        S.stats[g].b += b; S.stats[g].w += w; S.stats[g].n++;
+        S.hist.unshift({g:g,l:label,b:b,w:w}); if(S.hist.length>14) S.hist.pop();
+    }
+    // A round is recorded and paid in one storage snapshot, before presentation.
+    function commitRound(p, win, label) {
+        if(!p || S.pending!==p) return false;
+        var g=p.g;
+        if(g!=='s' && g!=='r' && g!=='p') return false;
+        win=finite(win,0);
+        if(g==='s') {
+            if(p.jack) S.jackpot=25000;
+            var extra=finite(p.freeAdd,0);
+            if(extra>0 && extra<=20 && LINE_BETS.indexOf(p.bet/5)>=0){S.free.left+=extra;S.free.total+=extra;S.free.bet=p.bet;}
+            if(!S.free.left) S.free={left:0,total:0,bet:0};
+        }
+        if(g==='r') {S.escrow=0;if(typeof p.number==='number' && p.number%1===0 && p.number>=0 && p.number<=36){S.nums.unshift(p.number);S.nums=S.nums.slice(0,9);}}
+        S.bank+=win;S.returned+=win;S.best=Math.max(S.best,win);
+        record(g,label,finite(p.cost,finite(p.bet,0)),win);S.pending=null;save();return true;
+    }
+    function recover() {
+        var p=S.pending, w=0, g, i, cards, used={};
+        if(p && typeof p==='object') {
+            g=p.g;
+            if(g==='s'||g==='r') w=finite(p.win,0);
+            else if(g==='p') {
+                cards=p.cards instanceof Array ? p.cards.slice():[];
+                if(p.phase!=='drawing' && cards.length===5 && p.deck instanceof Array && p.held instanceof Array) {var pos=5;for(i=0;i<5;i++)if(!p.held[i])cards[i]=p.deck[pos++];}
+                if(cards.length===5 && cards.every(function(c){if(typeof c!=='number'||c%1||c<0||c>51||used[c])return false;used[c]=true;return true;}))w=payFor(evalCards(cards),clamp(p.coins|0,1,5))*finite(p.bet,0);
+                else w=finite(p.bet,0);
+            }
+            commitRound(p,w,'Восстановленный раунд');
+        }
+        S.pending=null;S.bank+=S.escrow;S.escrow=0;save();
+    }
+    function save() { Lampa.Storage.set(KEY, JSON.parse(JSON.stringify(S))); }
     function xpNeed(l) { return 400 + (l - 1) * 260; }
 
     /* ---------------------------------------------------------------- sound */
@@ -97,10 +151,10 @@
             } catch (e) { this.ctx = null; }
             return this.ctx;
         },
-        resume: function () { var c = this.ensure(); if (c && c.state === 'suspended' && c.resume) c.resume(); },
+        resume: function () { if(!CFG.sound)return;var c=this.ensure();if(c&&c.state==='suspended'&&c.resume){try{var p=c.resume();if(p&&p.catch)p.catch(function(){});}catch(e){}} },
         sync: function () { if (this.master) this.master.gain.value = CFG.sound ? .6 : 0; },
         tone: function (f, dur, type, gain, when, slide) {
-            var c = this.ensure(); if (!c || !CFG.sound) return;
+            if(!CFG.sound)return;var c=this.ensure();if(!c)return;
             try {
                 var t = c.currentTime + (when || 0), o = c.createOscillator(), g = c.createGain();
                 o.type = type || 'square'; o.frequency.setValueAtTime(f, t);
@@ -112,7 +166,7 @@
             } catch (e) {}
         },
         noise: function (dur, freq, gain, when) {
-            var c = this.ensure(); if (!c || !CFG.sound) return;
+            if(!CFG.sound)return;var c=this.ensure();if(!c)return;
             try {
                 var t = c.currentTime + (when || 0), len = Math.max(1, Math.floor(c.sampleRate * dur));
                 var buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0), i;
@@ -142,7 +196,7 @@
         antic: function () { this.tone(300, .9, 'sawtooth', .028, 0, 900); },
         ball: function () { this.tone(2100, .05, 'square', .045); this.noise(.06, 3000, .04); },
         rollStart: function () {
-            var c = this.ensure(); if (!c || !CFG.sound || this.roll) return;
+            if(!CFG.sound||this.roll)return;var c=this.ensure();if(!c)return;
             try {
                 var len = Math.floor(c.sampleRate * 2), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0), i;
                 for (i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
@@ -262,7 +316,7 @@
 .vc{position:relative;transform-origin:0 0;-webkit-transform-origin:0 0;overflow:hidden;display:flex;flex-direction:column;\
  padding:16px;color:#f6eeff;border-radius:18px;background:linear-gradient(165deg,#1c1030,#0e0718 58%,#0a0512);\
  border:1px solid rgba(246,196,83,.16);box-shadow:0 20px 60px rgba(0,0,0,.55)}\
-.vc *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\
+.vc{box-sizing:border-box}.vc *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\
 .vc-top{flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;min-height:56px;margin-bottom:12px}\
 .vc-logo{font-size:26px;font-weight:800;letter-spacing:.14em;color:#f6c453;margin-right:16px;white-space:nowrap;\
  text-shadow:0 0 14px rgba(246,196,83,.45)}\
@@ -289,8 +343,8 @@
 .vc-game{display:none;height:100%}\
 .vc-game.act{display:block}\
 .vc-ctrl{flex:0 0 auto;margin-top:12px}\
-.vc-side{flex:0 0 320px;min-width:0;border-radius:14px;padding:16px;overflow-y:auto;overflow-x:hidden;\
- background:linear-gradient(160deg,#241634,#150c22);border:1px solid rgba(255,255,255,.07)}\
+.vc-side{flex:0 0 320px;min-width:0;border-radius:14px;padding:16px;overflow:hidden;\
+ background:#241634;border:1px solid rgba(255,255,255,.07)}\
 .vc-side::-webkit-scrollbar{width:8px}\
 .vc-side::-webkit-scrollbar-track{background:rgba(123,47,247,.16);border-radius:8px}\
 .vc-side::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#f6c453,#a8802c);border-radius:8px}\
@@ -464,7 +518,15 @@
 .vc .vc-card.held.selector.focus{transform:translateY(-18px) scale(1.05)}\
 .vc .vc-card.selector.focus .face{box-shadow:0 14px 30px rgba(0,0,0,.6),inset 0 0 0 4px #f6c453,0 0 26px rgba(246,196,83,.7)}\
 .vc .vc-card.selector.focus .back{box-shadow:0 14px 30px rgba(0,0,0,.6),inset 0 0 0 4px #f6c453,0 0 26px rgba(246,196,83,.7)}\
-.vc-fx{position:absolute;left:0;top:0;pointer-events:none;z-index:20}\
+.vc-fx{display:none;position:absolute;left:0;top:0;pointer-events:none;z-index:20}\
+.vc-side{width:320px;flex-shrink:0;height:100%;position:relative}\
+.vc-side .vc-prow{font-size:20px;margin-bottom:16px}.vc-side h4{font-size:16px;color:#bfaed8}\
+.vc-panel{display:none;position:absolute;left:16px;right:16px;top:16px;bottom:16px;z-index:30;background:#21152f;border:2px solid #a48bcd;border-radius:12px;padding:24px;overflow:hidden}\
+.vc-panel.open{display:block}.vc-panel-content{font-size:19px;line-height:1.35;height:calc(100% - 72px);overflow:hidden}.vc-panel-content .vc-prow{font-size:20px}.vc-panel-content h4{margin:8px 0;color:#ffe9a8}.vc-panel-nav{display:flex;flex-wrap:wrap}.vc-panel .vc-btn{margin-bottom:6px}\
+.vc.low .selector.focus,.vc.nofx .selector.focus{box-shadow:0 0 0 3px #f6c453;filter:none}.vc.low .vc-cell,.vc.nofx .vc-cell{text-shadow:none!important}\
+.vc-top .vc-mini{font-size:14px;padding:10px 12px}.vc-top .vc-stat{margin-right:12px}\
+.vc.compact{padding:12px}.vc.compact .vc-top{margin-bottom:8px}.vc.compact .vc-logo{font-size:21px;margin-right:8px}.vc.compact .vc-tab{font-size:16px;padding:9px 11px;margin-right:5px}.vc.compact .vc-mini{font-size:13px;padding:8px 9px;margin-left:4px}.vc.compact .vc-stat{margin-right:7px}.vc.compact .vc-stat b{font-size:21px}.vc.compact .vc-side{flex-basis:260px;width:260px;padding:12px}.vc.compact .vc-side .vc-prow{font-size:17px;margin-bottom:12px}.vc.compact .vc-wcol{flex-basis:235px;margin-right:10px}.vc.compact .vc-wheel{width:225px;height:225px}.vc.compact .vc-nrow{height:55px}.vc.compact .vc-orow{height:43px}.vc.compact .vc-bcell{font-size:19px}.vc.compact .vc-orow .vc-bcell,.vc.compact .vc-cols .vc-bcell{font-size:12px}.vc.compact .vc-btn{padding:10px 12px;font-size:16px;margin-right:6px}.vc.compact .vc-spin{padding:12px 24px;font-size:20px}.vc.compact .vc-step .s{width:35px;height:35px}.vc.compact .vc-step b{min-width:55px;font-size:19px}.vc.compact .vc-lab{margin-right:6px}.vc.compact .vc-pt{min-width:78px}.vc.compact .vc-pt u{font-size:10px}.vc.compact .vc-pt b{font-size:16px}\
+.vc-panel-content{overflow-wrap:break-word}.vc.narrow .vc-panel-content{height:calc(100% - 155px)}\
 .vc.mid .vc-side{display:none}\
 .vc.mid .vc-main{margin-right:0}\
 .vc.mid .vc-logo{font-size:22px;margin-right:12px}\
@@ -509,13 +571,13 @@
     <div class="vc-tab selector" data-a="g:poker">ПОКЕР</div>\
   </div>\
   <div class="vc-sp"></div>\
-  <div class="vc-stat"><span>БАНК</span><b class="vc-bank">0</b></div>\
+  <div class="vc-stat"><span>ФИШКИ</span><b class="vc-bank">0</b></div>\
   <div class="vc-stat"><span>УРОВЕНЬ</span><b class="vc-lvl">1</b></div>\
   <div class="vc-mini selector" data-a="bonus">БОНУС</div>\
-  <div class="vc-mini selector" data-a="sound"><i class="dot"></i><span>ЗВУК</span><b class="st">ВКЛ</b></div>\
-  <div class="vc-mini selector" data-a="turbo"><i class="dot"></i><span>ТУРБО</span><b class="st">ВЫКЛ</b></div>\
-  <div class="vc-mini selector" data-a="fx"><i class="dot"></i><span>ЭФФЕКТЫ</span><b class="st">ВКЛ</b></div>\
-  <div class="vc-mini selector" data-a="reset">СБРОС</div>\
+   <div class="vc-mini selector" data-a="info">ИНФО</div>\
+   <div class="vc-mini selector" data-a="settings">НАСТРОЙКИ</div>\
+   <div class="vc-mini selector" data-a="diag">ДИАГН.</div>\
+   <div class="vc-mini selector" data-a="exit">ВЫХОД</div>\
 </div>\
 <div class="vc-body">\
   <div class="vc-main">\
@@ -584,68 +646,76 @@
   </div>\
   <div class="vc-side"></div>\
 </div>\
-<canvas class="vc-fx"></canvas>\
+<canvas class="vc-fx"></canvas><div class="vc-panel"><div class="vc-panel-content"></div><div class="vc-panel-nav"></div></div>\
 </div></div>');
 
     /* ================================================================ COMPONENT */
+    var openInstances=0;
     function Casino() {
         var wrap = Lampa.Template.get('vc_main', {});
         var html = wrap.find('.vc');
         var nav = [], nr = 0, nc = 0, focusEl = null;
         var sched = [], running = false, raf = null, lastT = 0;
+        var alive = true, created=false, active = false, initialRAF = null, frameTime = 0, lastError = '', panel = '', panelPage = 0, panelReturn = null;
         var bankShown = S.bank, jackShown = S.jackpot, resetArm = 0;
-        var SCALE = 1, DW = 1600, DH = 860, MODE = 'wide';
+        var SCALE=1,DW=1600,DH=860,MODE='wide',availableW=0,availableH=0;
 
         /* ---------- авто-масштаб ---------- */
         function fit() {
-            var host = wrap[0].parentNode, rect = wrap[0].getBoundingClientRect();
+            if (!alive || !wrap[0].parentNode) return;
+            var host = wrap[0].parentNode, rect = host.getBoundingClientRect();
             var hw = host && host.clientWidth ? host.clientWidth : window.innerWidth;
-            var availW = Math.max(300, Math.min(hw, window.innerWidth - rect.left - 10));
-            var availH = Math.max(300, window.innerHeight - rect.top - 10);
-            var ar = availW / availH;
-            var mode = (availW < 820 || ar < .95) ? 'narrow' : ((availW < 1320 || ar < 1.45) ? 'mid' : 'wide');
-            DW = mode === 'narrow' ? 720 : (mode === 'mid' ? 1240 : 1600);
-            DH = mode === 'narrow' ? 1240 : 860;
-            var s = clamp(Math.min(availW / DW, availH / DH), .18, 2.2);
-            var changed = (mode !== MODE || Math.abs(s - SCALE) > .002);
+            var availW = Math.max(1, Math.min(hw, window.innerWidth - Math.max(0,rect.left) - 12));
+            var availH = Math.max(1, window.innerHeight - Math.max(0,wrap[0].getBoundingClientRect().top) - 12);
+            availableW=availW;availableH=availH;
+            var tv = false; try { tv = !!(Lampa.Platform && Lampa.Platform.is && (Lampa.Platform.is('tv') || Lampa.Platform.is('androidtv') || Lampa.Platform.is('tizen') || Lampa.Platform.is('webos'))); } catch(e) {}
+            tv = tv || /Android TV|SmartTV|SMART-TV|Tizen|Web0S|WebOS|AFT|TOX|SberBox/i.test(navigator.userAgent || '');
+            var mode = CFG.layout === 'mobile' ? 'narrow' : CFG.layout === 'tv' || CFG.layout === 'desktop' || tv || window.innerWidth >= window.innerHeight ? 'wide' : 'narrow';
+            var compact = mode==='wide' && availW<1320;
+            DW=mode==='narrow'?720:compact?1280:1600;
+            DH=mode==='narrow'?1240:compact?720:860;
+            var s = clamp(Math.min(availW / DW, availH / DH), .01, 2.2);
+            var changed = (mode !== MODE || Math.abs(s - SCALE) > .002 || html.hasClass('compact')!==compact);
             MODE = mode; SCALE = s;
-            html.removeClass('wide mid narrow').addClass(mode);
+            html.removeClass('wide mid narrow low balanced high nofx').addClass(mode).addClass(CFG.quality).toggleClass('nofx', !CFG.fx).toggleClass('compact',compact);
             html[0].style.width = DW + 'px';
             html[0].style.height = DH + 'px';
             html[0].style.webkitTransform = html[0].style.transform = 'scale(' + s.toFixed(4) + ')';
             wrap[0].style.width = Math.round(DW * s) + 'px';
             wrap[0].style.height = Math.round(DH * s) + 'px';
             wrap[0].style.marginLeft = Math.max(0, Math.round((availW - DW * s) / 2)) + 'px';
-            if (changed) { fxResize(); slotsMeasure(); wheelResize(); pokerMeasure(); buildNav(focusEl); }
+            if (changed || !FX.ctx) { fxResize(); slotsMeasure(); wheelResize(); pokerMeasure(); buildNav(focusEl); }
         }
 
         /* ---------- планировщик / цикл ---------- */
-        function at(d, fn) { sched.push({ t: now() + d, fn: fn }); }
+        function at(d, fn) { if(!alive || !active) return; sched.push({ t: now() + d, fn: fn }); startLoop(); }
         function tickSched(t) {
             if (!sched.length) return;
             var due = [], keep = [], i;
             for (i = 0; i < sched.length; i++) (t >= sched[i].t ? due : keep).push(sched[i]);
             sched = keep; due.sort(function (a, b) { return a.t - b.t; });
-            for (i = 0; i < due.length; i++) { try { due[i].fn(); } catch (e) {} }
+            for (i = 0; i < due.length; i++) { try { if(alive && active) due[i].fn(); } catch (e) { lastError=String(e); if(window.console) console.error('[CASINO]',e); } }
         }
-        function startLoop() { if (running) return; running = true; lastT = now(); raf = RAF(loop); }
+        function startLoop() { if (running || !alive || !active || document.hidden) return; running = true; lastT = now(); raf = RAF(loop); }
         function stopLoop() { running = false; if (raf) CAF(raf); raf = null; }
         function loop(t) {
             if (!running) return;
-            var dt = Math.min(.05, (t - lastT) / 1000); lastT = t;
+            if(CFG.quality==='low' && t-lastT<30){raf=RAF(loop);return;}
+            frameTime=t-lastT; var dt = Math.max(0,Math.min(.05, frameTime / 1000)); lastT = t;
             tickSched(t);
-            if (S.game === 'slots') slotsUpdate(t, dt);
-            else if (S.game === 'roulette') wheelUpdate(t, dt);
+            if (S.game === 'slots' && (sBusy || reels.some(function(r){return r.state!=='idle';}))) slotsUpdate(t, dt);
+            else if (S.game === 'roulette' && wState==='spin') wheelUpdate(t, dt);
             fxUpdate(dt);
             if (Math.abs(bankShown - S.bank) > .5) { bankShown += (S.bank - bankShown) * Math.min(1, dt * 9); bankEl.text(fmt(bankShown)); }
             else if (bankShown !== S.bank) { bankShown = S.bank; bankEl.text(fmt(S.bank)); }
             if (Math.abs(jackShown - S.jackpot) > .5) { jackShown += (S.jackpot - jackShown) * Math.min(1, dt * 6); jackEl.text(fmt(jackShown)); }
-            raf = RAF(loop);
+            else if (jackShown !== S.jackpot) {jackShown=S.jackpot; jackEl.text(fmt(jackShown));}
+            if(sched.length || sBusy || wState==='spin' || P.busy || FX.p.length || FX.shake || Math.abs(bankShown-S.bank)>.01 || Math.abs(jackShown-S.jackpot)>.01 || reels.some(function(r){return r.state!=='idle';})) raf = RAF(loop); else stopLoop();
         }
 
         /* ---------- refs ---------- */
         var bankEl = html.find('.vc-bank'), lvlEl = html.find('.vc-lvl'), jackEl = html.find('.vc-jv');
-        var sideEl = html.find('.vc-side'), msgEl = html.find('.vc-win .m'), winEl = html.find('.vc-wv');
+        var sideDetail='', sideEl = html.find('.vc-side'), msgEl = html.find('.vc-win .m'), winEl = html.find('.vc-wv');
         var winBox = html.find('.vc-win .a'), banEl = html.find('.vc-ban');
         var reelsEl = html.find('.vc-reels'), linesEl = html.find('.vc-lines');
         var fsEl = html.find('.vc-fs'), betEl = html.find('.vc-bv');
@@ -660,19 +730,19 @@
         /* ---------- частицы ---------- */
         var FX = { ctx: null, p: [], w: 0, h: 0, shake: 0, st: 0 };
         function fxResize() {
-            var ratio = Math.min(2, (window.devicePixelRatio || 1) * SCALE);
+            var ratio = Math.max(.25, Math.min(CFG.quality==='high'?2:CFG.quality==='low'?.65:1, (window.devicePixelRatio || 1) * SCALE));
             FX.w = DW; FX.h = DH;
             fxCv.width = Math.max(1, Math.floor(DW * ratio));
             fxCv.height = Math.max(1, Math.floor(DH * ratio));
             fxCv.style.width = DW + 'px'; fxCv.style.height = DH + 'px';
             FX.ctx = fxCv.getContext('2d');
-            FX.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+            if(FX.ctx) FX.ctx.setTransform(ratio, 0, 0, ratio, 0, 0); fxCv.style.display=CFG.fx && CFG.quality!=='low' && FX.p.length?'block':'none';
         }
         function localPos(el) {
             var r = el.getBoundingClientRect(), h = html[0].getBoundingClientRect();
             return { x: (r.left - h.left) / SCALE + r.width / SCALE / 2, y: (r.top - h.top) / SCALE + r.height / SCALE / 2 };
         }
-        function fxAdd(o) { if (!CFG.fx || FX.p.length > 140) return; FX.p.push(o); }
+        function fxAdd(o) { if (!CFG.fx || CFG.quality==='low' || FX.p.length >= (CFG.quality==='high'?140:65)) return; FX.p.push(o); fxCv.style.display='block'; startLoop(); }
         function fxBurst(el, color, n) {
             if (!el || !el[0]) return;
             var p = localPos(el[0]), i, a, s;
@@ -686,9 +756,9 @@
                 fxAdd({ t: 'c', x: p.x, y: p.y, vx: rnd(-230, 230), vy: rnd(-520, -170), g: 980, l: 0, m: rnd(1, 1.8),
                         r: rnd(5, 11), rot: rnd(0, 6.3), vr: rnd(-8, 8), c: Math.random() < .5 ? '#f6c453' : '#ffe9a8' });
         }
-        function fxKick(a) { if (CFG.fx) { FX.shake = Math.max(FX.shake, a); FX.st = 0; } }
+        function fxKick(a) { if (CFG.fx && CFG.quality!=='low') { FX.shake = Math.max(FX.shake, a); FX.st = 0; } }
         function fxUpdate(dt) {
-            var c = FX.ctx; if (!c) return;
+            var c=FX.ctx;if(!c)return;if(!CFG.fx||CFG.quality==='low'){FX.p.length=0;FX.shake=0;fxCv.style.display='none';return;}if(!FX.p.length){fxCv.style.display='none';if(!FX.shake)return;} 
             c.clearRect(0, 0, FX.w, FX.h);
             var i, p, k, w;
             for (i = FX.p.length - 1; i >= 0; i--) {
@@ -708,7 +778,7 @@
                     c.beginPath(); c.arc(p.x, p.y, p.r * k + .4, 0, 6.283); c.fill();
                 }
             }
-            c.globalAlpha = 1;
+            c.globalAlpha = 1; if(!FX.p.length)fxCv.style.display='none';
             var main = html.find('.vc-main')[0];
             if (FX.shake > .2) {
                 FX.st += dt; var d = FX.shake * Math.exp(-FX.st * 9);
@@ -725,18 +795,20 @@
         }
         function buildNav(keep) {
             var rows = [], i;
-            rows.push(html.find('.vc-top .selector').toArray());
-            if (S.game === 'slots') rows.push(html.find('.vc-cs .selector').toArray());
+            function appendRows(els){var bands=[], j, rect, mid, band, n;for(j=0;j<els.length;j++){rect=els[j].getBoundingClientRect();if(!rect.width||!rect.height)continue;mid=(rect.top+rect.bottom)/2;band=null;for(n=0;n<bands.length;n++)if(Math.abs(mid-bands[n].y)<=24*SCALE){band=bands[n];break;}if(!band){band={y:mid,els:[]};bands.push(band);}band.els.push(els[j]);}bands.sort(function(a,b){return a.y-b.y;});for(j=0;j<bands.length;j++){bands[j].els.sort(function(a,b){return center(a)-center(b);});rows.push(bands[j].els);}}
+            if(panel)appendRows(html.find('.vc-panel .selector').toArray());
+            else {appendRows(html.find('.vc-top .selector').toArray());
+            if (S.game === 'slots') appendRows(html.find('.vc-cs .selector').toArray());
             else if (S.game === 'poker') {
                 rows.push(cardsEl.find('.selector').toArray());
-                rows.push(html.find('.vc-cp .selector').toArray());
+                appendRows(html.find('.vc-cp .selector').toArray());
             } else {
                 for (i = 0; i < boardRows.length; i++) rows.push(boardRows[i].slice());
                 rows.push(html.find('.vc-chips .selector').toArray());
-                rows.push(html.find('.vc-cr .vc-row').eq(1).find('.selector').toArray());
-            }
+                appendRows(html.find('.vc-cr .vc-row').eq(1).find('.selector').toArray());
+            }}
             nav = [];
-            for (i = 0; i < rows.length; i++) if (rows[i].length) nav.push(rows[i]);
+            for (i = 0; i < rows.length; i++) {var enabled=rows[i].filter(function(e){return !$(e).hasClass('dis');});if(enabled.length)nav.push(enabled);}
             if (!nav.length) return;
             var p = keep ? locate(keep) : null;
             if (p) { nr = p[0]; nc = p[1]; }
@@ -762,13 +834,13 @@
             Snd.move(); applyFocus();
         }
         function fire(el) {
-            if (!el) return;
-            var t = now();
+            if (!el || !alive || !active || $(el).hasClass('dis')) return;
+            startLoop(); var t = now();
             if (el._fire && t - el._fire < 160) return;
             el._fire = t;
             if (nav[nr] && nav[nr][nc] !== el) { var p = locate(el); if (p) { nr = p[0]; nc = p[1]; } }
             applyFocus();
-            act($(el).data('a'), el);
+            try {act($(el).data('a'), el);if(alive&&active)buildNav(focusEl);}catch(e){lastError=String(e);if(window.console)console.error('[CASINO]',e);Lampa.Noty.show('Ошибка казино — см. ДИАГН.');}
         }
 
         /* ---------- общий UI ---------- */
@@ -789,22 +861,12 @@
             paintToggle('fx', CFG.fx);
         }
         function addXP(v) {
-            S.xp += v;
-            var need = xpNeed(S.level);
-            while (S.xp >= need) {
-                S.xp -= need; S.level++;
-                var b = 150 * S.level; S.bank += b;
-                Lampa.Noty.show('Уровень ' + S.level + ' · +' + fmt(b) + ' фишек');
-                Snd.level(); fxBurst(bankEl, '#22e0ff', 24);
-                need = xpNeed(S.level);
-            }
-            renderTop();
+            var old=S.level, reward=0;S.xp+=v;
+            var need=xpNeed(S.level);
+            while(S.xp>=need){S.xp-=need;S.level++;var b=150*S.level;S.bank+=b;S.bonuses+=b;reward+=b;need=xpNeed(S.level);}
+            return S.level!==old?reward:0;
         }
-        function pushHist(g, label, bet, win) {
-            S.hist.unshift({ g: g, l: label, b: bet, w: win });
-            if (S.hist.length > 14) S.hist.pop();
-            renderSide();
-        }
+        function announceLevel(reward){if(reward){Lampa.Noty.show('Уровень '+S.level+' · +'+fmt(reward)+' фишек');Snd.level();fxBurst(bankEl,'#22e0ff',24);}}
         function renderSide() {
             var h = '', i, s;
             if (S.game === 'slots') {
@@ -814,7 +876,7 @@
                     h += '<div class="vc-prow"><i style="color:' + s.c + '">' + s.g + s.g + s.g + '</i><b>' + s.p[2] + ' / ' + s.p[3] + ' / ' + s.p[4] + '</b></div>';
                 }
                 h += '<div class="vc-note"><b>W</b> заменяет любой символ кроме <b>B</b>. <b>B</b>×3/4/5 → 8/12/20 фриспинов, выигрыши ×2. ' +
-                     'Пять <b>W</b> на линии забирают джекпот. Возврат ≈ 92%.</div>';
+                     'Пять <b>W</b> на линии забирают джекпот. Возврат зависит от правил, ставки и джекпота.</div>';
             } else if (S.game === 'poker') {
                 h += '<h4>JACKS OR BETTER · 9/6</h4>';
                 for (i = 9; i >= 1; i--) {
@@ -822,8 +884,8 @@
                     h += '<div class="vc-prow' + (P.result === i ? ' hi' : '') + '"><span>' + PNAME[i] + '</span><b>' + m + '×</b></div>';
                 }
                 h += '<div class="vc-note">Колода 52 карты, одна раздача и один обмен. Выплата — множитель × ставка (монета × монет). ' +
-                     '<b>Роял-флеш при 5 монетах платит 800×</b> вместо 250×. Возврат при верной игре ≈ <b>99.5%</b>. ' +
-                     'Кнопка СОВЕТ подбирает удержание перебором ожиданий.</div>';
+                     '<b>Роял-флеш при 5 монетах платит 800×</b> вместо 250×. Теоретический возврат таблицы при оптимальной игре и 5 монетах ≈ <b>99.5%</b>. ' +
+                     'Кнопка СОВЕТ даёт приблизительную подсказку.</div>';
             } else {
                 h += '<h4>РУЛЕТКА · ВЫПЛАТЫ</h4>' +
                      '<div class="vc-prow"><span>Число 0–36</span><b>35 : 1</b></div>' +
@@ -833,8 +895,8 @@
                      '<div class="vc-prow"><span>1–18 / 19–36</span><b>1 : 1</b></div>' +
                      '<div class="vc-note">Европейское колесо: 37 карманов, одно зеро. При <b>0</b> внешние ставки проигрывают. Возврат <b>97.3%</b>.</div>';
             }
-            var net = S.bank - S.start;
-            h += '<h4 class="mt">СЕССИЯ</h4>' +
+            var net = S.returned - S.wagered;
+            h += '<h4 class="mt">ИТОГ ИГР · ВСЁ ВРЕМЯ</h4>' +
                  '<div class="vc-prow"><span>Итог</span><b style="color:' + (net >= 0 ? '#8dff4a' : '#ff3b4e') + '">' + (net > 0 ? '+' : '') + fmt(net) + '</b></div>' +
                  '<div class="vc-prow"><span>Поставлено</span><b>' + fmt(S.wagered) + '</b></div>' +
                  '<div class="vc-prow"><span>Возврат</span><b>' + (S.wagered ? Math.round(S.returned / S.wagered * 100) + '%' : '—') + '</b></div>' +
@@ -844,11 +906,31 @@
                 h += '<h4 class="mt">ПОСЛЕДНИЕ</h4>';
                 for (i = 0; i < Math.min(4, S.hist.length); i++) {
                     var e = S.hist[i], d = e.w - e.b;
-                    h += '<div class="vc-prow"><span>' + e.l + '</span><b style="color:' + (d > 0 ? '#8dff4a' : (d < 0 ? '#ff3b4e' : '#a394c0')) + '">' +
+                    h += '<div class="vc-prow"><span>' + escapeHTML(e.l) + '</span><b style="color:' + (d > 0 ? '#8dff4a' : (d < 0 ? '#ff3b4e' : '#a394c0')) + '">' +
                          (d > 0 ? '+' : '') + fmt(d) + '</b></div>';
                 }
             }
-            sideEl.html(h);
+            sideEl.html('<h4>КРАТКАЯ СТАТИСТИКА</h4><div class="vc-prow"><span>Игровой итог</span><b>'+fmt(net)+'</b></div><div class="vc-prow"><span>Ставки</span><b>'+fmt(S.wagered)+'</b></div><div class="vc-prow"><span>Выплаты</span><b>'+fmt(S.returned)+'</b></div><div class="vc-prow"><span>Бонусы (v1.4+)</span><b>'+fmt(S.bonuses)+'</b></div><div class="vc-prow"><span>Раунды</span><b>'+fmt(S.spins+S.rspin+S.pkn)+'</b></div><div class="vc-note">ИНФО — правила и история. BACK — выход. Только виртуальные фишки.</div>'); sideDetail=h;
+        }
+        function openPanel(name){ if(panel)return; panelReturn=focusEl;panel=name;panelPage=0;showPanel(); }
+        function closePanel(){ if(!panel)return;panel='';html.find('.vc-panel').removeClass('open');buildNav(panelReturn);panelReturn=null; }
+        function showPanel(){
+            if(!panel)return; var previous=focusEl&&$(focusEl).data('a'), content=html.find('.vc-panel-content'), buttons=html.find('.vc-panel-nav'), h='', b='', k;
+            function btn(a,t){return '<div class="vc-btn selector" data-a="'+a+'">'+t+'</div>';}
+            if(panel==='info'){
+                renderSide(); var temp=$('<div>'+sideDetail+'</div>'), children=temp.children(), per=MODE==='narrow'?8:10, pages=Math.max(1,Math.ceil(children.length/per))+1; panelPage=panelPage%pages;
+                if(panelPage===pages-1){h='<h4>ПО ИГРАМ · С ВЕРСИИ 1.4</h4>';for(k in S.stats){var z=S.stats[k];h+='<div class="vc-prow"><span>'+({s:'Слоты',r:'Рулетка',p:'Покер'}[k])+' · '+fmt(z.n)+' раундов</span><b>'+fmt(z.w-z.b)+'</b></div>';} }
+                else {h='<h4>ИНФО · '+(panelPage+1)+'/'+pages+'</h4>';children.slice(panelPage*per,(panelPage+1)*per).each(function(){h+=this.outerHTML;});}
+                b+=btn('nextpanel','ДАЛЕЕ');
+            } else if(panel==='settings'){
+                h='<h4>НАСТРОЙКИ</h4><p>Режим: '+CFG.layout+' · Графика: '+CFG.quality+'</p><p>Звук: '+(CFG.sound?'ВКЛ':'ВЫКЛ')+' · Турбо: '+(CFG.turbo?'ВКЛ':'ВЫКЛ')+' · Эффекты: '+(CFG.fx?'ВКЛ':'ВЫКЛ')+'</p><p>BACK — закрыть окно. Сброс удаляет виртуальный прогресс.</p>';
+                b+=btn('layout','ЭКРАН')+btn('quality','ГРАФИКА')+btn('sound','ЗВУК')+btn('turbo','ТУРБО')+btn('fx','ЭФФЕКТЫ')+btn('reset',resetArm?'ЕЩЁ РАЗ?':'СБРОС');
+            } else {
+                var e=sideEl[0], cs=window.getComputedStyle(e), rect=e.getBoundingClientRect();
+                h='<h4>ДИАГНОСТИКА · 1.4.0-beta.1</h4><div>Viewport: '+window.innerWidth+' × '+window.innerHeight+' · DPR: '+(window.devicePixelRatio||1)+'</div><div>Host: '+wrap[0].parentNode.clientWidth+' · Available: '+Math.round(availableW)+' × '+Math.round(availableH)+' · Mode: '+MODE+(html.hasClass('compact')?'/compact':'')+' · Scale: '+SCALE.toFixed(3)+'</div><div>Side: '+Math.round(rect.width)+' × '+Math.round(rect.height)+' · '+cs.display+' / '+cs.visibility+' / '+cs.opacity+' · nodes: '+e.children.length+'</div><div>Canvas: '+fxCv.width+' × '+fxCv.height+' · frame: '+frameTime.toFixed(1)+' ms (последний кадр)</div><div>Pending: '+(S.pending?S.pending.g:'none')+' · escrow: '+S.escrow+'</div><div>UA: '+escapeHTML(navigator.userAgent||'')+'</div><div>Last error: '+escapeHTML(lastError||'none')+'</div>';
+                b+=btn('nextpanel','ОБНОВИТЬ');
+            }
+            content.html(h); buttons.html(b+btn('closepanel','НАЗАД'));html.find('.vc-panel').addClass('open');nr=nc=0;var next=previous&&html.find('.vc-panel [data-a="'+previous+'"]')[0];buildNav(next);
         }
         function banner(t, s) {
             banEl.find('b').text(t); banEl.find('i').text(s); banEl.addClass('on');
@@ -858,7 +940,9 @@
         /* ============================ SLOTS ============================ */
         var reels = [], L = 0, cellH = 100, centers = [], lineEls = [];
         var sBusy = false, sStopped = 0, sTargets = [], sGrid = [], sPending = null;
-        var auto = 0, autoInf = false, freeOn = false, freeLeft = 0, freeTotal = 0;
+        var auto = 0, autoInf = false, freeOn = false, freeLeft = 0, freeTotal = 0, freeBet=0;
+        function storeFree(){ S.free={left:freeLeft,total:freeTotal,bet:freeBet}; }
+        function loadFree(){freeLeft=S.free.left;freeTotal=S.free.total;freeBet=S.free.bet;freeOn=freeLeft>0;} 
 
         function slotsBuild() {
             var i, k;
@@ -906,7 +990,7 @@
                 c.el.style.webkitTransform = c.el.style.transform = 'translate3d(0,' + y + ',0)';
             }
         }
-        function bet() { return LINE_BETS[S.betIdx] * 5; }
+        function bet() { return freeOn && freeBet ? freeBet : LINE_BETS[S.betIdx] * 5; }
         function slotsSync() {
             while (S.betIdx > 0 && LINE_BETS[S.betIdx] * 5 > S.bank && !freeOn) S.betIdx--;
             betEl.text(fmt(bet()));
@@ -933,24 +1017,29 @@
         }
         function spin() {
             Snd.resume();
-            if (sBusy) return;
-            var b = bet(), i;
+            if (sBusy || S.pending) return;
+            var b=bet(),i,reward=0;
             if (!freeOn) {
                 if (S.bank < b) { Lampa.Noty.show('Не хватает фишек — забери бонус'); stopAuto(); slotsSync(); return; }
-                S.bank -= b; S.wagered += b; S.spins++; S.jackpot += b * .01; addXP(b);
+                S.bank -= b; S.wagered += b; S.spins++; S.jackpot += b * .01; reward=addXP(b);
+            if(auto>0) auto--;
             } else freeLeft--;
-            sBusy = true; sStopped = 0; clearHits();
-            winEl.text('0'); winBox.addClass('zero'); banEl.removeClass('on');
-            msgEl.html(freeOn ? 'Фриспин · множитель <b>×2</b>' : 'Барабаны вращаются…');
-            slotsSync(); renderTop();
-            Snd.tone(220, .07, 'square', .05); Snd.rollStart();
-
+            storeFree();
             var turbo = CFG.turbo;
             sTargets = []; sGrid = [];
             for (i = 0; i < 5; i++) {
                 var t = ri(0, L - 1); sTargets.push(t);
                 sGrid.push([reels[i].data[mod(t, L)], reels[i].data[mod(t + 1, L)], reels[i].data[mod(t + 2, L)]]);
             }
+            sPending={bet:b,mult:freeOn?2:1};
+            var result=evaluate();S.pending={g:'s',bet:b,cost:freeOn?0:b,win:result.total,freeAdd:result.freeAdd,jack:result.jack};save();
+            sBusy = true; sStopped = 0; clearHits();
+            winEl.text('0'); winBox.addClass('zero'); banEl.removeClass('on');
+            msgEl.html(freeOn ? 'Фриспин · множитель <b>×2</b>' : 'Барабаны вращаются…');
+            slotsSync(); renderTop();
+            Snd.tone(220, .07, 'square', .05); Snd.rollStart();
+
+            announceLevel(reward);
             var sc01 = 0;
             for (i = 0; i < 3; i++) { if (sGrid[0][i] === SCAT) sc01++; if (sGrid[1][i] === SCAT) sc01++; }
             var ant = sc01 >= 2, speed = turbo ? 32 : 24, base = turbo ? 520 : 1150, gap = turbo ? 110 : 250;
@@ -967,7 +1056,7 @@
                 Snd.antic();
                 for (var j = 0; j < reels.length; j++) if (reels[j].ant && reels[j].state === 'spin') reels[j].el.className = 'vc-reel ant';
             });
-            sPending = { bet: b, mult: freeOn ? 2 : 1 };
+            startLoop();
         }
         function reelStop(r, i) {
             r.state = 'bounce'; r.b0 = now();
@@ -1002,27 +1091,19 @@
         }
         function settleSlots(quiet) {
             if (!sPending) return;
-            var res = evaluate(), p = sPending; sPending = null;
-            if (res.total > 0) {
-                S.bank += res.total; S.returned += res.total;
-                if (res.total > S.best) S.best = res.total;
-                if (res.jack) S.jackpot = 25000;
-                if (quiet) {
-                    sBusy = false;
-                    if (res.freeAdd) { freeOn = true; freeLeft += res.freeAdd; freeTotal += res.freeAdd; }
-                    winEl.text(fmt(res.total)); winBox.removeClass('zero');
-                    msgEl.html('Выплата <b>' + fmt(res.total) + '</b>');
-                    pushHist('s', 'Выигрыш', p.bet, res.total);
-                    slotsSync(); renderTop(); renderSide(); save();
-                    return;
-                }
-                present(res, p);
-            } else {
-                msgEl.html(freeOn ? 'Фриспин без выигрыша' : 'Мимо. Барабаны ждут ещё раз');
-                if (!quiet) Snd.lose();
-                endRound(p.bet, 0, 'Без выигрыша');
+            var res=evaluate(),p=sPending, pending=S.pending;
+            if(!pending || pending.g!=='s')return;
+            sPending=null;
+            if(!commitRound(pending,pending.win,res.jack?'ДЖЕКПОТ':res.freeAdd?'Фриспины +'+res.freeAdd:res.total?'Выигрыш':'Без выигрыша'))return;
+            loadFree();renderSide();
+            if(res.total>0){
+                if(quiet){sBusy=false;winEl.text(fmt(res.total));winBox.removeClass('zero');msgEl.html('Выплата <b>'+fmt(res.total)+'</b>');slotsSync();renderTop();return;}
+                present(res,p);
+            }else{
+                msgEl.html(p.mult>1?'Фриспин без выигрыша':'Без выигрыша');if(!quiet)Snd.lose();
+                if(quiet){sBusy=false;slotsSync();}else endRound(p.bet,0,'Без выигрыша');
             }
-            renderTop(); save();
+            renderTop();
         }
         function present(res, p) {
             var ratio = res.total / p.bet, i, r, row, val = res.total, t0 = now();
@@ -1052,7 +1133,6 @@
                 Snd.fanfare(); fxCoins(html.find('.vc-cab'), ratio >= 25 ? 46 : 24); fxKick(ratio >= 25 ? 10 : 6);
             } else { Snd.win(ratio); fxCoins(winEl, clamp(Math.round(ratio * 2), 4, 18)); }
             if (res.freeAdd) at(700, function () {
-                freeOn = true; freeLeft += res.freeAdd; freeTotal += res.freeAdd;
                 Lampa.Noty.show('Фриспины ×' + res.freeAdd + ' · выигрыши удваиваются');
                 Snd.fanfare(); fxBurst(html.find('.vc-cab'), '#22e0ff', 30); slotsSync();
             });
@@ -1061,16 +1141,14 @@
             });
         }
         function endRound(b, w, label) {
-            pushHist('s', label, b, w);
             sBusy = false; slotsSync(); renderSide();
             if (freeOn) {
-                if (freeLeft > 0) { at(CFG.turbo ? 280 : 620, function () { if (freeOn && !sBusy) spin(); }); return; }
+                if (freeLeft > 0) { at(CFG.turbo ? 280 : 620, function () { if (S.game==='slots' && freeOn && !sBusy) spin(); }); return; }
                 freeOn = false; freeTotal = 0; slotsSync(); Lampa.Noty.show('Фриспины закончились');
             }
             if (autoInf || auto > 0) {
-                if (!autoInf) auto--;
                 if (S.bank < bet()) { stopAuto(); Lampa.Noty.show('Автоигра остановлена: мало фишек'); }
-                else { slotsSync(); at(CFG.turbo ? 260 : 520, function () { if ((autoInf || auto > 0) && !sBusy) spin(); }); }
+                else { slotsSync(); at(CFG.turbo ? 260 : 520, function () { if (S.game==='slots' && auto > 0 && !sBusy && !freeOn) spin(); }); }
             }
         }
         function stopAuto() { auto = 0; autoInf = false; slotsSync(); }
@@ -1085,12 +1163,12 @@
                     if (u >= 1) { r.pos = r.target; reelStop(r, i); }
                 } else if (r.state === 'bounce') {
                     var k = (t - r.b0) / 300;
-                    if (k >= 1) { r.pos = r.target; r.state = 'idle'; }
+                    if (k >= 1) { r.pos = r.target; r.state = 'idle'; drawReel(r); }
                     else r.pos = r.target + .17 * Math.sin(k * Math.PI * 2.2) * Math.exp(-4.2 * k);
                 }
                 var sp = Math.abs(r.pos - r.last) / Math.max(dt, .001); r.last = r.pos;
                 if (r.state !== 'idle') drawReel(r);
-                if (CFG.fx) {
+                if (CFG.fx && CFG.quality==='high') {
                     var bl = clamp((sp - 7) / 10, 0, 3), f = bl > .2 ? 'blur(' + bl.toFixed(2) + 'px)' : '';
                     if (r.strip.style.webkitFilter !== f) { r.strip.style.webkitFilter = f; r.strip.style.filter = f; }
                 } else if (r.strip.style.filter) { r.strip.style.webkitFilter = ''; r.strip.style.filter = ''; }
@@ -1164,17 +1242,17 @@
         function rSync() {
             tbEl.text(fmt(totalBet())); mwEl.text(fmt(maxWin()));
             html.find('[data-a="rspin"]').toggleClass('dis', totalBet() <= 0 || wState !== 'idle').text(wState === 'idle' ? 'ВРАЩАТЬ' : 'ШАР…');
-            html.find('[data-a="undo"]').toggleClass('dis', !stack.length);
-            html.find('[data-a="clear"]').toggleClass('dis', totalBet() <= 0);
-            html.find('[data-a="double"]').toggleClass('dis', totalBet() <= 0);
+            html.find('[data-a="undo"]').toggleClass('dis', !stack.length || wState!=='idle');
+            html.find('[data-a="clear"]').toggleClass('dis', totalBet() <= 0 || wState!=='idle');
+            html.find('[data-a="double"]').toggleClass('dis', totalBet() <= 0 || wState!=='idle');
             for (var i = 0; i < CHIPS.length; i++) html.find('[data-a="chip:' + i + '"]').toggleClass('act', i === S.chipIdx);
-            brdEl.toggleClass('lock', wState !== 'idle');
+            brdEl.toggleClass('lock', wState !== 'idle');html.find('.vc-cr [data-a="repeat"], .vc-cr .vc-chip, .vc-brd .selector').toggleClass('dis',wState!=='idle');
         }
         function place(k, amount, quiet) {
             if (wState !== 'idle') return;
             var v = amount || CHIPS[S.chipIdx];
             if (S.bank < v) { Lampa.Noty.show('Не хватает фишек — выбери фишку меньше'); return; }
-            S.bank -= v;
+            S.bank -= v; S.escrow+=v;
             if (!bets[k]) bets[k] = { sum: 0, list: [] };
             bets[k].sum += v; bets[k].list.push(v);
             stack.push({ k: k, v: v });
@@ -1183,13 +1261,14 @@
         }
         function unplace(k) {
             if (wState !== 'idle' || !bets[k] || !bets[k].list.length) return;
-            var v = bets[k].list.pop(); bets[k].sum -= v; S.bank += v;
+            var v = bets[k].list.pop(); bets[k].sum -= v; S.bank += v; S.escrow-=v;
             for (var i = stack.length - 1; i >= 0; i--) if (stack[i].k === k) { stack.splice(i, 1); break; }
             if (bets[k].sum <= 0) delete bets[k];
             Snd.click(); paintChip(k); rSync(); renderTop(); save();
         }
         function clearBets(refund) {
-            if (refund) S.bank += totalBet();
+            if(wState!=='idle') return;
+            if (refund) S.bank += totalBet(); S.escrow=0;
             bets = {}; stack = []; repaint(); rSync(); renderTop(); save();
         }
         function wheelResize() {
@@ -1198,7 +1277,7 @@
             var pad = parseFloat(getComputedStyle(box).paddingLeft) || 0;
             var w = box.clientWidth - pad * 2;
             if (w <= 4) return;
-            var ratio = Math.min(2.2, (window.devicePixelRatio || 1) * SCALE);
+            var ratio = Math.max(.25,Math.min(CFG.quality==='high'?2.2:CFG.quality==='low'?.75:1.25, (window.devicePixelRatio || 1) * SCALE));
             wSize = w;
             wheelCv.width = Math.max(1, Math.floor(w * ratio));
             wheelCv.height = Math.max(1, Math.floor(w * ratio));
@@ -1334,12 +1413,14 @@
         }
         function rSpin() {
             Snd.resume();
-            if (wState !== 'idle') return;
+            if (wState !== 'idle' || S.pending) return;
             var t = totalBet();
             if (t <= 0) { Lampa.Noty.show('Сначала поставь фишки на поле'); return; }
             S.last = JSON.parse(JSON.stringify(bets));
-            S.wagered += t; S.rspin++; addXP(t);
+            S.wagered += t; S.rspin++; var reward=addXP(t);
             wResult = ORDER[ri(0, 36)];
+            var payout=0,k,d; for(k in bets){d=def(k);if(d&&d.t(wResult))payout+=bets[k].sum*(d.m+1);}
+            S.pending={g:'r',bet:t,cost:t,win:payout,number:wResult}; S.escrow=0;save();announceLevel(reward);
             var turbo = CFG.turbo, step = 6.283 / 37;
             wT = turbo ? 2600 : 5200; wT0 = now();
             th0 = wTheta; thTr = 6.283 * (turbo ? 1.6 : 2.6) + rnd(0, 6.283);
@@ -1352,11 +1433,11 @@
             resN.attr('class', 'n').text('?');
             resT.html('Шар в игре…<br>Ставки: <b>' + fmt(t) + '</b>');
             Snd.rollStart(); Snd.tone(320, .2, 'triangle', .05);
-            rSync(); renderTop(); save();
+            rSync(); renderTop(); save(); startLoop();
         }
         function wheelUpdate(t, dt) {
             var R = wSize / 2, i;
-            if (!R) return;
+            if (!R) {if(wState==='spin' && t-wT0>=wT){wState='idle';rSettle(true);}return;}
             if (wState === 'spin') {
                 var u = clamp((t - wT0) / wT, 0, 1);
                 wTheta = th0 + thTr * eOutQuart(u);
@@ -1378,30 +1459,29 @@
             }
             drawWheel();
         }
-        function rSettle() {
-            var n = wResult, col = colOf(n), win = 0, stake = totalBet(), k, d, pay;
+        function rSettle(quiet) {
+            if(!S.pending || S.pending.g!=='r') return; wState='idle';
+            var pending=S.pending,n=pending.number,col=colOf(n),win=pending.win,stake=pending.bet,k,d,pay;
+            var cn=col==='red'?'красное':col==='black'?'чёрное':'зеро';
+            if(!commitRound(pending,win,'Рулетка · '+n+' '+cn))return;
             resN.attr('class', 'n ' + col).text(n);
             for (k in bets) {
                 d = def(k);
                 if (d && d.t(n)) {
-                    pay = bets[k].sum * (d.m + 1); win += pay;
+                    pay = bets[k].sum * (d.m + 1);
                     cellOf(k).addClass('won').append('<div class="vc-fl">+' + fmt(pay) + '</div>');
                 }
             }
-            S.bank += win; S.returned += win; if (win > S.best) S.best = win;
-            var cn = col === 'red' ? 'красное' : col === 'black' ? 'чёрное' : 'зеро';
             resT.html('Выпало <b>' + n + '</b> · ' + cn + '<br>' + (win > 0 ? 'Выплата <b>' + fmt(win) + '</b>' : 'Ставка ' + fmt(stake) + ' не сыграла'));
-            if (win > 0) {
+            if (!quiet && win > 0) {
                 Snd.win(win / Math.max(1, stake));
                 fxCoins(resN, clamp(Math.round(win / Math.max(1, stake) * 3), 6, 40));
                 if (win >= stake * 8) { Snd.fanfare(); fxKick(9); Lampa.Noty.show('Крупный выигрыш: +' + fmt(win)); }
-            } else Snd.lose();
-            S.nums.unshift(n); if (S.nums.length > 9) S.nums.pop();
-            renderNums();
-            pushHist('r', 'Рулетка · ' + n + ' ' + cn, stake, win);
+            } else if(!quiet) Snd.lose();
+            renderNums();renderSide();
             bets = {}; stack = [];
             at(1600, function () { repaint(); rSync(); });
-            rSync(); renderTop(); save();
+            rSync(); renderTop(); save();buildNav(focusEl);
         }
         function renderNums() {
             var h = '', i;
@@ -1410,6 +1490,7 @@
         }
 
         /* ============================ POKER ============================ */
+        var hintToken=0,pokerEpoch=0;
         var P = { phase: 'idle', cards: [0, 1, 2, 3, 4], held: [false, false, false, false, false],
                   deck: [], pos: 0, bet: 0, coins: 5, result: -1, busy: false, els: [] };
 
@@ -1465,7 +1546,8 @@
             html.find('[data-a="coin-"],[data-a="coin+"],[data-a="cn-"],[data-a="cn+"],[data-a="cmax"]').toggleClass('dis', lock);
             html.find('[data-a="hint"]').toggleClass('dis', P.phase !== 'dealt' || P.busy);
             html.find('[data-a="deal"]').text(P.busy ? 'ОБМЕН…' : (P.phase === 'dealt' ? 'ОБМЕН' : 'РАЗДАТЬ'))
-                .toggleClass('stop', P.phase === 'dealt');
+                .toggleClass('stop', P.phase === 'dealt').toggleClass('dis',P.busy);
+            cardsEl.find('.selector').toggleClass('dis',P.phase!=='dealt'||P.busy);
             for (var i = 1; i <= 9; i++) ptableEl.find('[data-i="' + i + '"] b').text(payFor(i, S.coins) + '×');
         }
         function pokerMark(idx, cls) {
@@ -1478,16 +1560,20 @@
             for (i = 51; i > 0; i--) { j = ri(0, i); t = d[i]; d[i] = d[j]; d[j] = t; }
             P.deck = d; P.pos = 0;
         }
+        function persistPoker(){ S.pending={g:'p',bet:P.bet,cost:P.bet,coins:P.coins,phase:P.phase,cards:P.cards.slice(),held:P.held.slice(),deck:P.deck.slice()};save(); }
         function pokerDeal() {
             Snd.resume();
             if (P.busy) return;
             if (P.phase === 'dealt') { pokerDraw(false); return; }
+            if(S.pending)return;
             var b = pokerBet();
             if (S.bank < b) { Lampa.Noty.show('Не хватает фишек — забери бонус или снизь монету'); return; }
-            S.bank -= b; S.wagered += b; S.pkn++; addXP(b);
-            P.bet = b; P.coins = S.coins; P.result = -1; P.busy = true;
+            hintToken++;pokerEpoch++;
+            S.bank -= b; S.wagered += b; S.pkn++; var reward=addXP(b);
+            P.bet = b; P.coins = S.coins; P.result = -1; P.busy = true; P.phase='dealing';
             pokerShuffle();
-            for (var i = 0; i < 5; i++) { P.cards[i] = P.deck[P.pos++]; P.held[i] = false; P.els[i].$.removeClass('up held win'); }
+            for (var i = 0; i < 5; i++) { P.cards[i] = P.deck[P.pos++]; P.held[i]=false; }
+            persistPoker();announceLevel(reward);for(i=0;i<5;i++)P.els[i].$.removeClass('up held win');
             pokerMark(-1, 'hit'); pokerMark(-1, 'live');
             pwinEl.text('0'); pwinBox.addClass('zero'); banEl.removeClass('on');
             pmsgEl.html('Раздача…');
@@ -1501,16 +1587,16 @@
                 });
             })(i);
             at(5 * step + 180, function () {
-                P.busy = false; P.phase = 'dealt';
+                P.busy = false; P.phase = 'dealt'; persistPoker();
                 var idx = evalCards(P.cards);
                 pokerMark(idx, 'live');
                 pmsgEl.html(idx >= 1 ? 'Сейчас: <b>' + PNAME[idx] + '</b> · OK по карте — держать' : 'OK по карте — держать, затем ОБМЕН');
-                pokerSync();
+                pokerSync();buildNav(focusEl);
             });
         }
         function pokerHold(i) {
             if (P.phase !== 'dealt' || P.busy) return;
-            P.held[i] = !P.held[i];
+            hintToken++;P.held[i] = !P.held[i]; persistPoker();
             P.els[i].$.toggleClass('held', P.held[i]);
             Snd.hold(P.held[i]);
             var n = 0;
@@ -1519,9 +1605,10 @@
         }
         function pokerDraw(quiet) {
             if (P.busy && !quiet) return;
-            P.busy = true; P.phase = 'drawing';
+            hintToken++;P.busy = true; P.phase = 'drawing';
             var replaced = [], i;
             for (i = 0; i < 5; i++) if (!P.held[i]) { P.cards[i] = P.deck[P.pos++]; replaced.push(i); }
+            persistPoker();
             pokerMark(-1, 'live');
             pokerSync();
             if (quiet) { pokerFinish(true); return; }
@@ -1536,18 +1623,19 @@
             at(replaced.length * step + 320, function () { pokerFinish(false); });
         }
         function pokerFinish(quiet) {
-            var idx = evalCards(P.cards), mult = payFor(idx, P.coins), win = mult * P.bet, i;
+            if(!S.pending || S.pending.g!=='p') return;
+            var idx=evalCards(P.cards),mult=payFor(idx,P.coins),win=mult*P.bet,i;
+            if(!commitRound(S.pending,win,PNAME[idx]))return;
             P.result = idx; P.busy = false; P.phase = 'done';
             pokerMark(idx, 'hit');
-            for (i = 0; i < 5; i++) { P.els[i].$.addClass('up'); P.els[i].$.toggleClass('win', idx >= 1); }
+            for (i = 0; i < 5; i++) { pokerFace(i); P.els[i].$.addClass('up'); P.els[i].$.toggleClass('win', idx >= 1); }
             if (win > 0) {
-                S.bank += win; S.returned += win; if (win > S.best) S.best = win;
                 pwinBox.removeClass('zero');
                 pmsgEl.html('<b>' + PNAME[idx] + '</b> · ' + mult + '× ставки');
                 if (quiet) { pwinEl.text(fmt(win)); }
                 else {
-                    var t0 = now();
-                    (function cnt() { var u = clamp((now() - t0) / 700, 0, 1); pwinEl.text(fmt(win * eOutCubic(u))); if (u < 1) at(40, cnt); })();
+                    var t0=now(),epoch=pokerEpoch;
+                    (function cnt() { if(epoch!==pokerEpoch)return;var u = clamp((now() - t0) / 700, 0, 1); pwinEl.text(fmt(win * eOutCubic(u))); if (u < 1) at(40, cnt); })();
                     if (idx === 9) {
                         banner('РОЯЛ-ФЛЕШ!', '+' + fmt(win) + ' фишек');
                         Snd.royal(); fxCoins(cardsEl, 70); fxBurst(cardsEl, '#ff2d95', 40); fxKick(14);
@@ -1564,8 +1652,7 @@
                 pmsgEl.html('Нет комбинации. РАЗДАТЬ — новая рука');
                 if (!quiet) Snd.lose();
             }
-            pushHist('p', PNAME[idx], P.bet, win);
-            pokerSync(); renderTop(); renderSide(); save();
+            pokerSync(); renderTop(); renderSide(); save();buildNav(focusEl);
         }
         function pokerHint() {
             if (P.phase !== 'dealt' || P.busy) return;
@@ -1575,8 +1662,10 @@
             var seed = 12345;
             for (i = 0; i < 5; i++) seed = (seed * 31 + P.cards[i] * 7919) % 4294967296;
             function rr() { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
-            var best = 0, bestEV = -1, samples = 200;
-            for (mask = 0; mask < 32; mask++) {
+            var best=0,bestEV=-1,samples=200,token=++hintToken;mask=0;
+            pmsgEl.text('Подсказка рассчитывается…');
+            function chunk(){if(token!==hintToken||P.phase!=='dealt'||P.busy)return;var limit=Math.min(mask+2,32);
+            for (; mask < limit; mask++) {
                 var keep = [], need = 0;
                 for (i = 0; i < 5; i++) { if (mask & (1 << i)) keep.push(P.cards[i]); else need++; }
                 var ev = 0;
@@ -1595,15 +1684,17 @@
                 }
                 if (ev > bestEV + 1e-9) { bestEV = ev; best = mask; }
             }
+            if(mask<32){at(1,chunk);return;}
             var n = 0;
             for (i = 0; i < 5; i++) {
                 P.held[i] = !!(best & (1 << i));
                 P.els[i].$.toggleClass('held', P.held[i]);
                 if (P.held[i]) n++;
             }
-            Snd.hold(true);
+            persistPoker(); Snd.hold(true);
             fxBurst(cardsEl, '#22e0ff', 18);
-            pmsgEl.html('Совет: держим <b>' + n + '</b> из 5 · ожидаемая выплата ≈ <b>' + bestEV.toFixed(2) + '×</b>');
+            pmsgEl.html('Приблизительный совет: держим <b>' + n + '</b> из 5 · ожидаемая выплата ≈ <b>' + bestEV.toFixed(2) + '×</b>');
+            }at(1,chunk);
         }
 
         /* ---------- действия ---------- */
@@ -1611,11 +1702,22 @@
             if (!a) return;
             Snd.resume();
             var parts = a.split(':'), cmd = parts[0], arg = parts[1], k, i;
+            if(panel && ['closepanel','nextpanel','layout','quality','sound','turbo','fx','reset'].indexOf(cmd)<0)return;
             if (cmd === 'g') { switchGame(arg); return; }
+            if(wState!=='idle' && ['b','chip','undo','clear','repeat','double'].indexOf(cmd)>=0)return;
+            if(sBusy && ['bet-','bet+','max'].indexOf(cmd)>=0)return;
             if (cmd === 'b') { place(arg); return; }
             if (cmd === 'hold') { pokerHold(parseInt(arg, 10)); return; }
             if (cmd === 'chip') { S.chipIdx = parseInt(arg, 10); Snd.chip(); rSync(); save(); return; }
             switch (cmd) {
+                case 'exit': Lampa.Activity.backward(); break;
+                case 'info': openPanel('info'); break;
+                case 'settings': openPanel('settings'); break;
+                case 'diag': openPanel('diag'); break;
+                case 'closepanel': closePanel(); break;
+                case 'nextpanel': panelPage++; showPanel(); break;
+                case 'layout': var ls=['auto','tv','desktop','mobile']; cfgSet('layout',ls[(ls.indexOf(CFG.layout)+1)%ls.length]);Lampa.Storage.set('vc_force_tv',CFG.layout==='tv');fit();showPanel();break;
+                case 'quality': var qs=['low','balanced','high'];cfgSet('quality',qs[(qs.indexOf(CFG.quality)+1)%qs.length]);if(CFG.quality==='low'){FX.p.length=0;FX.shake=0;html.find('.vc-main')[0].style.transform='';}fit();fxResize();wheelResize();showPanel();break;
                 case 'sound':
                     cfgSet('sound', !CFG.sound); Snd.sync();
                     if (CFG.sound) { Snd.resume(); Snd.win(4); }
@@ -1626,22 +1728,22 @@
                     Lampa.Noty.show('Турбо ' + (CFG.turbo ? 'включено — быстрые спины и раздачи' : 'выключено')); break;
                 case 'fx':
                     cfgSet('fx', !CFG.fx);
-                    if (!CFG.fx) { FX.p.length = 0; FX.shake = 0; html.find('.vc-main')[0].style.transform = ''; }
-                    else { fxBurst($(el), '#8dff4a', 30); fxCoins($(el), 14); fxKick(5); }
+                    if (!CFG.fx) { FX.p.length = 0; FX.shake = 0; fxCv.style.display='none'; html.find('.vc-main')[0].style.transform = ''; }
+                    else { fxBurst($(el), '#8dff4a', 30); fxCoins($(el), 14); fxKick(5); } html.toggleClass('nofx',!CFG.fx);
                     Snd.click(); renderTop();
                     Lampa.Noty.show('Эффекты ' + (CFG.fx ? 'включены — частицы, размытие, тряска' : 'выключены — чистый экран')); break;
                 case 'bonus':
                     if (S.day !== dayKey()) {
-                        var amt = 300 + S.level * 100; S.day = dayKey(); S.bank += amt;
+                        var amt = 300 + S.level * 100; S.day = dayKey(); S.bank += amt; S.bonuses+=amt;
                         Lampa.Noty.show('Дневной бонус: +' + fmt(amt) + ' фишек'); Snd.win(12); fxCoins($(el), 20);
                     } else if (S.bank < CHIPS[0] && Date.now() - (S.rescue || 0) >= 1800000) {
-                        S.rescue = Date.now(); S.bank += 150; Lampa.Noty.show('Спонсорский купон: +150'); Snd.win(6);
+                        S.rescue = Date.now(); S.bank += 150; S.bonuses+=150; Lampa.Noty.show('Спонсорский купон: +150'); Snd.win(6);
                     } else Lampa.Noty.show('Бонус уже забран — возвращайся завтра');
-                    renderTop(); slotsSync(); rSync(); pokerSync(); save(); break;
+                    renderTop(); slotsSync(); rSync(); pokerSync();renderSide(); save(); break;
                 case 'reset':
-                    if (now() - resetArm < 4000) { resetArm = 0; html.find('[data-a="reset"]').text('СБРОС'); doReset(); }
+                    if (resetArm > 0 && now() - resetArm < 4000) { resetArm = 0; html.find('[data-a="reset"]').text('СБРОС'); doReset(); }
                     else { resetArm = now(); $(el).text('ЕЩЁ РАЗ?'); Lampa.Noty.show('Нажми ещё раз в течение 4 секунд');
-                        at(4100, function () { html.find('[data-a="reset"]').text('СБРОС'); }); }
+                        at(4100, function () { if(now()-resetArm>=4000){resetArm=0;html.find('[data-a="reset"]').text('СБРОС');} }); }
                     break;
                 case 'bet-': if (S.betIdx > 0 && !freeOn) { S.betIdx--; Snd.click(); slotsSync(); save(); } break;
                 case 'bet+': if (S.betIdx < LINE_BETS.length - 1 && !freeOn) { S.betIdx++; Snd.click(); slotsSync(); save(); } break;
@@ -1651,8 +1753,8 @@
                     while (i > 0 && LINE_BETS[i] * 5 > S.bank) i--;
                     S.betIdx = i; Snd.chip(); slotsSync(); save(); break;
                 case 'auto':
-                    if (auto > 0 || autoInf) { if (auto > 0 && !autoInf) { auto = 0; autoInf = true; Lampa.Noty.show('Автоигра ∞'); } else stopAuto(); slotsSync(); }
-                    else { auto = 10; autoInf = false; slotsSync(); if (!sBusy && !freeOn) spin(); }
+                    if (auto > 0) { stopAuto(); slotsSync(); }
+                    else if(!sBusy && !freeOn){ auto=10;autoInf=false;slotsSync();spin(); }
                     break;
                 case 'spin': if (auto > 0 || autoInf) { stopAuto(); Lampa.Noty.show('Автоигра остановлена'); } else spin(); break;
                 case 'rspin': rSpin(); break;
@@ -1685,25 +1787,26 @@
                 case 'hint': pokerHint(); break;
                 case 'deal': pokerDeal(); break;
             }
+            if(panel==='settings' && ['sound','turbo','fx','reset'].indexOf(cmd)>=0)showPanel();
         }
         function doReset() {
             var keep = { s: CFG.sound, t: CFG.turbo, f: CFG.fx };
-            sched.length = 0; Snd.rollStop(); stopAuto();
+            hintToken++;pokerEpoch++;sched.length = 0; Snd.rollStop(); stopAuto();FX.p.length=0;FX.shake=0;fxCv.style.display='none';html.find('.vc-main')[0].style.transform='';
             sBusy = false; sPending = null; freeOn = false; freeLeft = 0; freeTotal = 0;
             for (var i = 0; i < reels.length; i++) { reels[i].state = 'idle'; reels[i].pos = reels[i].target = Math.round(reels[i].pos); drawReel(reels[i]); }
-            clearHits();
+            clearHits();for(var j=0;j<reels.length;j++){reels[j].strip.style.filter='';reels[j].strip.style.webkitFilter='';}
             wState = 'idle'; wSettled = 0; bets = {}; stack = []; repaint();
             P.phase = 'idle'; P.busy = false; P.result = -1; P.bet = 0;
             for (i = 0; i < 5; i++) { P.held[i] = false; P.els[i].$.removeClass('up held win'); }
             pokerMark(-1, 'hit'); pokerMark(-1, 'live');
             pwinEl.text('0'); pwinBox.addClass('zero');
             pmsgEl.html('РАЗДАТЬ — новая рука. OK по карте — держать.');
-            S = fresh(); bankShown = S.bank; jackShown = S.jackpot;
+            S = fresh(); freeBet=0; bankShown = S.bank; jackShown = S.jackpot; bankEl.text(fmt(S.bank)); jackEl.text(fmt(S.jackpot)); applyGame(); closePanel(); buildNav(); slotsMeasure();
             cfgSet('sound', keep.s); cfgSet('turbo', keep.t); cfgSet('fx', keep.f);
             winEl.text('0'); winBox.addClass('zero'); banEl.removeClass('on');
             msgEl.html('Новая сессия. OK — крутить');
             resN.attr('class', 'n').text('—'); resT.html('Ставьте фишки на поле<br>и запускайте колесо');
-            renderNums(); renderTop(); renderSide(); slotsSync(); rSync(); pokerSync(); save();
+            renderNums(); renderTop(); renderSide(); slotsSync(); rSync(); pokerSync(); save();buildNav(focusEl);
             Lampa.Noty.show('Прогресс сброшен · банк 2 500');
         }
         function applyGame() {
@@ -1720,9 +1823,10 @@
         }
         function switchGame(g) {
             if (S.game === g) return;
+            if(sBusy || wState==='spin' || P.busy){Lampa.Noty.show('Дождись завершения раунда');return;}
             if (S.game === 'roulette' && wState === 'idle' && totalBet() > 0) { clearBets(true); Lampa.Noty.show('Фишки со стола возвращены в банк'); }
             if (S.game === 'poker' && P.phase === 'dealt' && !P.busy) pokerDraw(true);
-            stopAuto();
+            stopAuto();for(var j=0;j<reels.length;j++)if(reels[j].state!=='idle'){reels[j].state='idle';reels[j].pos=reels[j].target;drawReel(reels[j]);}
             S.game = g; save(); Snd.click();
             applyGame();
             at(50, function () {
@@ -1736,20 +1840,24 @@
         }
 
         /* ---------- события ---------- */
-        html.find('.selector').on('hover:enter click', function (e) { e.preventDefault(); fire(this); });
+        html.on('hover:enter click', '.selector', function (e) { e.preventDefault(); fire(this); });
         html.on('mouseenter', '.selector', function () {
             if (nav[nr] && nav[nr][nc] === this) return;
             var p = locate(this); if (p) { nr = p[0]; nc = p[1]; applyFocus(); }
         });
         var rzT = null;
-        function onResize() { clearTimeout(rzT); rzT = setTimeout(function () { fit(); }, 120); }
+        function onResize() { if(!active||!alive)return;clearTimeout(rzT); rzT = setTimeout(function () { if(active&&alive)fit(); }, 120); }
+        function suspendAudio(){if(Snd.ctx&&Snd.ctx.suspend)try{var p=Snd.ctx.suspend();if(p&&p.catch)p.catch(function(){});}catch(e){}}
+        function visibility(){if(document.hidden){stopLoop();Snd.rollStop();suspendAudio();}else if(active){startLoop();}}
+        document.addEventListener('visibilitychange',visibility);
         window.addEventListener('resize', onResize);
         var ro = null;
         if (window.ResizeObserver) { try { ro = new ResizeObserver(onResize); } catch (e) { ro = null; } }
 
         /* ---------- жизненный цикл ---------- */
         this.create = function () {
-            slotsBuild(); boardBuild(); pokerBuild();
+            if(created)return this.render();created=true;openInstances++;
+            recover(); loadFree();bankShown=S.bank;jackShown=S.jackpot; slotsBuild(); boardBuild(); pokerBuild();
             cfgRefresh();
             renderTop(); renderSide(); renderNums(); slotsSync(); rSync(); pokerSync();
             bankEl.text(fmt(S.bank)); jackEl.text(fmt(S.jackpot));
@@ -1758,9 +1866,9 @@
         };
         this.render = function () { return wrap; };
         this.start = function () {
-            cfgRefresh(); renderTop(); Snd.sync();
+            if(!alive)return;active=true; cfgRefresh(); renderTop(); Snd.sync();
             fit();
-            RAF(function () { fit(); slotsMeasure(); wheelResize(); pokerMeasure(); buildNav(focusEl); });
+            initialRAF=RAF(function () { initialRAF=null;if(!active||!alive)return;fit(); slotsMeasure(); wheelResize(); pokerMeasure(); buildNav(focusEl); });
             if (ro && wrap[0].parentNode) { try { ro.observe(wrap[0].parentNode); } catch (e) {} }
             if (!focusEl) { nr = 1; nc = S.game === 'slots' ? html.find('.vc-cs .selector').length - 1 : (S.game === 'poker' ? 0 : 1); }
             buildNav(focusEl);
@@ -1771,24 +1879,24 @@
                 up: function () { navMove('up'); },
                 down: function () { navMove('down'); },
                 enter: function () { if (nav[nr] && nav[nr][nc]) fire(nav[nr][nc]); },
-                back: function () { Lampa.Activity.backward(); }
+                back: function () { if(panel)closePanel();else Lampa.Activity.backward(); }
             });
             Lampa.Controller.toggle('content');
             startLoop();
             if (S.day !== dayKey()) Lampa.Noty.show('Дневной бонус доступен: +' + fmt(300 + S.level * 100));
         };
-        this.pause = function () { stopLoop(); Snd.rollStop(); settleSlots(true); save(); };
+        this.pause = function () { active=false; stopLoop(); Snd.rollStop();suspendAudio(); if(ro)ro.disconnect();clearTimeout(rzT);if(initialRAF)CAF(initialRAF);initialRAF=null; };
         this.stop = function () {};
         this.destroy = function () {
-            stopLoop(); Snd.rollStop(); sched.length = 0;
-            window.removeEventListener('resize', onResize);
-            if (ro) { try { ro.disconnect(); } catch (e) {} }
-            if (wState === 'idle' && totalBet() > 0) S.bank += totalBet();
-            if (P.phase === 'dealt' || P.phase === 'drawing') pokerFinish(true);
-            bets = {}; stack = [];
-            save(); FX.p.length = 0; wBowl = null; wHead = null; wrap.remove();
+            if(!alive)return;if(created)openInstances=Math.max(0,openInstances-1);
+            active=false; alive=false; stopLoop(); Snd.rollStop(); sched.length=0;clearTimeout(rzT);if(initialRAF)CAF(initialRAF);
+            window.removeEventListener('resize',onResize);document.removeEventListener('visibilitychange',visibility);
+            if(ro)ro.disconnect();
+            recover(); bets={};stack=[];FX.p.length=0;wBowl=null;wHead=null;
+            if(Snd.ctx){try{var closing=Snd.ctx.close?Snd.ctx.close():Snd.ctx.suspend?Snd.ctx.suspend():null;if(closing&&closing.catch)closing.catch(function(){});}catch(e){} Snd.ctx=null;Snd.master=null;}
+            wrap.remove();
         };
-        this.back = function () { Lampa.Activity.backward(); };
+        this.back = function () { if(panel)closePanel();else Lampa.Activity.backward(); };
     }
 
     /* ---------------------------------------------------------------- register */
@@ -1799,6 +1907,7 @@
             component: 'vcasino', name: 'Казино',
             icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9v6M12 9v6M16 9v6"/></svg>'
         });
+        Lampa.SettingsApi.addParam({ component:'vcasino',param:{name:'vc_force_tv',type:'trigger',default:false},field:{name:'Принудительный TV',description:'Если экран на приставке выглядит как смартфон'},onChange:function(v){cfgSet('layout',v===true||v==='true'?'tv':'auto');} });
         Lampa.SettingsApi.addParam({ component: 'vcasino', param: { name: 'vc_sound', type: 'trigger', default: true },
             field: { name: 'Звук', description: 'Барабаны, карты, шар, выигрыши' },
             onChange: function (v) { cfgSet('sound', v === true || v === 'true'); Snd.sync(); } });
@@ -1815,13 +1924,15 @@
         var item = $('<li class="menu__item selector" data-action="vcasino">\
 <div class="menu__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9v6M12 9v6M16 9v6"/></svg></div>\
 <div class="menu__text">Казино</div></li>');
-        item.on('hover:enter click', function () {
+        var lastMenu=0;item.on('hover:enter click', function () {
+            if(lastMenu && now()-lastMenu<500)return;lastMenu=now();if(openInstances){Lampa.Noty.show('Казино уже открыто. Вернись назад.');return;}
             Lampa.Activity.push({ url: '', component: 'vcasino', title: 'Казино', page: 1 });
         });
         $('.menu .menu__list').eq(0).append(item);
     }
 
     $('body').append(Lampa.Template.get('vc_css', {}, true));
+    window.plugin_vcasino = true;
     if (window.appready) addMenu();
     else Lampa.Listener.follow('app', function (e) { if (e.type === 'ready') addMenu(); });
 })();
