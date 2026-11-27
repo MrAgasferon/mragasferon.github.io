@@ -1,5 +1,5 @@
 /* =============================================================================
- * VELICRON CASINO for Lampa — слоты · европейская рулетка · видеопокер Jacks or Better
+ * CASINO for Lampa — слоты · европейская рулетка · видеопокер Jacks or Better
  * v1.3.0 · ES5 · без зависимостей · виртуальные фишки · управление пультом
  *
  * НОВОЕ
@@ -21,8 +21,8 @@
  * ========================================================================== */
 (function () {
     'use strict';
-    if (window.plugin_velicron_casino) return;
-    window.plugin_velicron_casino = true;
+    if (window.plugin_vcasino) return;
+    window.plugin_vcasino = true;
 
     /* ---------------------------------------------------------------- utils */
     var RAF = window.requestAnimationFrame || window.webkitRequestAnimationFrame ||
@@ -53,7 +53,7 @@
     function cfgRefresh() { CFG.sound = cfgRead('sound', true); CFG.turbo = cfgRead('turbo', false); CFG.fx = cfgRead('fx', true); }
 
     /* ---------------------------------------------------------------- state */
-    var KEY = 'velicron_casino';
+    var KEY = 'vcasino';
     var LINE_BETS = [1, 2, 5, 10, 25, 50, 100];
     var CHIPS = [5, 25, 100, 500];
     var CHIP_C = { 5: '#ff8fa0', 25: '#9dffc9', 100: '#a9d8ff', 500: '#e0b3ff' };
@@ -502,7 +502,7 @@
 
     Lampa.Template.add('vc_main', '<div class="vc-fit"><div class="vc">\
 <div class="vc-top">\
-  <div class="vc-logo">VELICRON <i>CASINO</i></div>\
+  <div class="vc-logo">CASINO</div>\
   <div class="vc-tabs">\
     <div class="vc-tab selector act" data-a="g:slots">СЛОТЫ</div>\
     <div class="vc-tab selector" data-a="g:roulette">РУЛЕТКА</div>\
@@ -522,7 +522,7 @@
     <div class="vc-stage">\
       <div class="vc-game vc-gs act">\
         <div class="vc-cab">\
-          <div class="vc-marq"><b>VELICRON SLOTS</b><div class="vc-jack"><span>ДЖЕКПОТ</span><i class="vc-jv">25 000</i></div></div>\
+          <div class="vc-marq"><b>SLOTS</b><div class="vc-jack"><span>ДЖЕКПОТ</span><i class="vc-jv">25 000</i></div></div>\
           <div class="vc-reels"><div class="vc-glass"></div><svg class="vc-lines"></svg></div>\
           <div class="vc-fs"><span class="vc-fst">ФРИСПИНЫ</span><i class="vc-fsi"></i></div>\
           <div class="vc-win"><div class="m">OK — крутить, ←/→ — ставка</div><div class="a zero"><span>ВЫИГРЫШ</span><b class="vc-wv">0</b></div></div>\
@@ -1422,7 +1422,7 @@
             cardsEl.empty(); P.els = [];
             for (i = 0; i < 5; i++) {
                 var c = $('<div class="vc-card selector" data-a="hold:' + i + '">\
-<div class="back"><b>V</b></div>\
+<div class="back"><b>★</b></div>\
 <div class="face"><span class="r1"></span><span class="s1"></span><span class="r2"></span></div>\
 <div class="hold">ДЕРЖИМ</div></div>');
                 cardsEl.append(c);
@@ -1816,7 +1816,7 @@
 <div class="menu__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9v6M12 9v6M16 9v6"/></svg></div>\
 <div class="menu__text">Казино</div></li>');
         item.on('hover:enter click', function () {
-            Lampa.Activity.push({ url: '', component: 'vcasino', title: 'Velicron Casino', page: 1 });
+            Lampa.Activity.push({ url: '', component: 'vcasino', title: 'Казино', page: 1 });
         });
         $('.menu .menu__list').eq(0).append(item);
     }
